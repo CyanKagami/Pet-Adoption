@@ -1,0 +1,86 @@
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# ==========================================
+# Dependencies (Node.js)
+# ==========================================
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ==========================================
+# Next.js / Frontend Build Outputs
+# ==========================================
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+.next/
+out/
+build/
+dist/
+
+# Next.js telemetry and cache
+.next/cache/
+*.tsbuildinfo
+*.cache
+
+# ==========================================
+# Prisma & Backend Outputs
+# ==========================================
+backend/dist/
+backend/build/
+prisma/migrations/dev/
+
+# SQLite / Local Database files (if any)
+*.sqlite
+*.sqlite-journal
+*.db
+
+# ==========================================
+# Docker & OS System Files
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# ==========================================
+# IDE & Code Editor Files
+# ==========================================
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ==========================================
+# Logs & Testing
+# ==========================================
+logs
+*.log
+coverage/
+.nyc_output/
