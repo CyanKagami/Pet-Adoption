@@ -1,19 +1,18 @@
 FROM node:22-alpine
 
-# ติดตั้ง netcat (nc) สำหรับให้ entrypoint.sh เช็กการพร้อมใช้งานของ PostgreSQL
 RUN apk add --no-cache netcat-openbsd
 
 WORKDIR /app
 
-# คัดลอก package.json และ package-lock.json เพื่อติดตั้ง dependencies
+# 1. Copy package files and prisma schema first so dependencies/generations have access to the schema
 COPY package*.json ./
+COPY prisma ./prisma/
 
 RUN npm install
 
-# คัดลอก ซอร์สโค้ด และ Prisma schema ทั้งหมด
+# 2. Copy the rest of your source code
 COPY . .
 
-# ให้สิทธิ์สคริปต์ entrypoint สำหรับสั่ง run prisma migrate และ start server
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

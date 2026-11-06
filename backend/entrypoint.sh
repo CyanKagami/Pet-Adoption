@@ -8,7 +8,7 @@ done
 echo "✅ PostgreSQL is up and running!"
 
 echo "🔄 Running Prisma migrations..."
-npx prisma migrate dev --name init || npx prisma db push
+npx prisma@7 migrate dev --name init || npx prisma@7 db push
 
 echo "🚀 Starting Backend Application..."
 exec npm run dev
