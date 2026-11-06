@@ -1,0 +1,16 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# คัดลอก package.json และ package-lock.json
+COPY package*.json ./
+
+RUN npm install
+
+# คัดลอกโค้ด Next.js ทั้งหมด
+COPY . .
+
+EXPOSE 3000
+
+# รัน Next.js ใน mode development (พร้อม Hot-reload)
+CMD ["npm", "run", "dev"]
