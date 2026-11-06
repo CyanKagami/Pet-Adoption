@@ -1,0 +1,170 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum PetStatus {
+  AVAILABLE
+  ADOPTED
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String   @map("password_hash")
+  fullName        String   @map("full_name")
+  phoneNumber     String?  @map("phone_number")
+  address         String?
+  profileImage    String?  @map("profile_image")
+  isVerified      Boolean  @default(false) @map("is_verified")
+  role            Role     @default(USER)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  petsPosted       Pet[]         @relation("UserPets")
+  applications     Application[] @relation("UserApplications")
+  wishlists        Wishlist[]    @relation("UserWishlists")
+  reviewsGiven     Review[]      @relation("ReviewsGiven")
+  reviewsReceived  Review[]      @relation("ReviewsReceived")
+  messagesSent     Message[]     @relation("SentMessages")
+  messagesReceived Message[]     @relation("ReceivedMessages")
+
+  @@map("users")
+}
+
+model Pet {
+  id                 String    @id @default(uuid())
+  ownerId            String    @map("owner_id")
+  name               String
+  type               String    // e.g. Dog, Cat
+  breed              String?
+  ageMonths          Int?      @map("age_months")
+  gender             String?   // Male, Female
+  location           String
+  description        String?   @db.Text
+  healthInfo         Json?     @map("health_info") // ประวัติสุขภาพ/วัคซีน/การทำหมัน
+  adoptionConditions String?   @map("adoption_conditions") @db.Text // เงื่อนไขการรับเลี้ยง
+  status             PetStatus @default(AVAILABLE)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  owner        User          @relation("UserPets", fields: [ownerId], references: [id], onDelete: Cascade)
+  images       PetImage[]
+  applications Application[]
+  wishlists    Wishlist[]
+  updates      PetUpdate[]
+
+  @@index([status])
+  @@index([type])
+  @@index([location])
+  @@map("pets")
+}
+
+model PetImage {
+  id        String   @id @default(uuid())
+  petId     String   @map("pet_id")
+  imageUrl  String   @map("image_url")
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("pet_images")
+}
+
+model Application {
+  id            String            @id @default(uuid())
+  petId         String            @map("pet_id")
+  applicantId   String            @map("applicant_id")
+  readinessForm Json              @map("readiness_form") // แบบประเมินความพร้อม (ที่อยู่อาศัย, รายได้ ฯลฯ)
+  status        ApplicationStatus @default(PENDING)
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  pet       Pet  @relation(fields: [petId], references: [id], onDelete: Cascade)
+  applicant User @relation("UserApplications", fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@unique([petId, applicantId])
+  @@map("applications")
+}
+
+model Wishlist {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  petId     String   @map("pet_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation("UserWishlists", fields: [userId], references: [id], onDelete: Cascade)
+  pet  Pet  @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, petId])
+  @@map("wishlists")
+}
+
+model PetUpdate {
+  id           String   @id @default(uuid())
+  petId        String   @map("pet_id")
+  updatePeriod String   @map("update_period") // e.g., '1_month', '3_months', '1_year'
+  images       Json     // รายการรูปภาพอัปเดต [3-5 รูป]
+  description  String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@map("pet_updates")
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  reviewerId String   @map("reviewer_id")
+  targetId   String   @map("target_id")
+  rating     Int
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  reviewer User @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+  target   User @relation("ReviewsReceived", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  senderId   String   @map("sender_id")
+  receiverId String   @map("receiver_id")
+  content    String   @db.Text
+  isRead     Boolean  @default(false) @map("is_read")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  sender   User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
