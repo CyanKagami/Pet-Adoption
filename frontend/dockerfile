@@ -5,12 +5,16 @@ WORKDIR /app
 # คัดลอก package.json และ package-lock.json
 COPY package*.json ./
 
-RUN npm install
+RUN npm ci
 
 # คัดลอกโค้ด Next.js ทั้งหมด
 COPY . .
 
+COPY entrypoint.sh /app/entrypoint.sh
+RUN sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.package-lock.sha256 \
+    && chmod +x /app/entrypoint.sh
+
 EXPOSE 3000
 
 # รัน Next.js ใน mode development (พร้อม Hot-reload)
-CMD ["npm", "run", "dev"]
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]

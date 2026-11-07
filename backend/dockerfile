@@ -8,12 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install
+RUN npm ci
 
 # 2. Copy the rest of your source code
 COPY . .
 
 COPY entrypoint.sh /app/entrypoint.sh
+RUN sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.package-lock.sha256
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 5000

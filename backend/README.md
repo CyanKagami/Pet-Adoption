@@ -43,3 +43,13 @@ docker compose exec -T backend npm run test:api -- --suite reviews
 Tests use `DATABASE_URL` and `JWT_SECRET` from the backend environment. `API_BASE_URL` is optional and defaults to `http://localhost:5000/api/v1`. Each run creates uniquely identified database fixtures and removes them afterward.
 
 The non-pet suites follow the API specification. They will fail with a not-found response until their endpoints are implemented by the backend.
+
+## Docker dependency installation
+
+No local `npm install` is required. Build and start the services from the repository root:
+
+```powershell
+docker compose up --build
+```
+
+The Docker images install dependencies from each package lockfile using `npm ci`. At startup, each container checks whether its `node_modules` volume matches the lockfile and reinstalls dependencies inside the container if needed. This also handles existing dependency volumes after package changes.
