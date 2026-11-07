@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "test:api": "node scripts/run-api-tests.js"
   },
   "keywords": [],
   "author": "",
