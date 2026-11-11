@@ -95,24 +95,42 @@ async function createTestUser(id, name) {
   );
 }
 
-async function createUpdateForm({
-  period = '1m',
-  description = 'API test update',
+async function createImageForm(fields, {
   imageCount = 3,
   imageType = 'image/png',
   imageSize = 18,
 } = {}) {
   const form = new FormData();
-  form.set('period', period);
-  form.set('description', description);
+  for (const [name, value] of Object.entries(fields)) form.set(name, value);
   for (let index = 0; index < imageCount; index += 1) {
     form.append(
       'images',
-      new Blob([new Uint8Array(imageSize)], { type: imageType }),
+      new Blob([new Uint8Array(Array.isArray(imageSize) ? imageSize[index] : imageSize)], { type: imageType }),
       `api-test-${index}.png`,
     );
   }
   return form;
+}
+
+function createUpdateForm({
+  period = '1m',
+  description = 'API test update',
+  ...imageOptions
+} = {}) {
+  return createImageForm({ period, description }, imageOptions);
+}
+
+function createPetForm({
+  name = 'API image upload test pet',
+  type = 'Dog',
+  location = fixture.location,
+  imageType = 'image/png',
+  imageSize = 18,
+} = {}) {
+  return createImageForm(
+    { name, type, location },
+    { imageCount: 1, imageType, imageSize },
+  );
 }
 
 describe('Pet adoption API', () => {
@@ -309,6 +327,42 @@ describe('Pet adoption API', () => {
           location: fixture.location,
           health_history: ['not', 'an', 'object'],
         }),
+      });
+    });
+
+    it('POST /pets rejects unsupported image types', async () => {
+      await expectApiError('/pets', {
+        status: 400,
+        code: 'INVALID_IMAGES',
+        method: 'POST',
+        token: fixture.ownerToken,
+        body: await createPetForm({ imageType: 'text/plain' }),
+      });
+    });
+
+    it('POST /pets accepts an image exactly five megabytes in size', async () => {
+      const { response, body } = await request('/pets', {
+        method: 'POST',
+        token: fixture.ownerToken,
+        body: await createPetForm({ imageSize: 5 * 1024 * 1024 }),
+      });
+
+      assert.equal(response.status, 201);
+      const { rows } = await pool.query(
+        'SELECT image_url FROM pet_images WHERE pet_id = $1',
+        [body.data.pet_id],
+      );
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].image_url.startsWith('/uploads/pets/'), true);
+    });
+
+    it('POST /pets rejects an image larger than five megabytes', async () => {
+      await expectApiError('/pets', {
+        status: 400,
+        code: 'LIMIT_FILE_SIZE',
+        method: 'POST',
+        token: fixture.ownerToken,
+        body: await createPetForm({ imageSize: 5 * 1024 * 1024 + 1 }),
       });
     });
 
@@ -756,6 +810,19 @@ describe('Pet adoption API', () => {
       });
     });
 
+    it('POST /pets/:pet_id/updates accepts an image exactly five megabytes in size', async () => {
+      const form = await createUpdateForm({ imageSize: [5 * 1024 * 1024, 18, 18] });
+      const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: form,
+      });
+
+      assert.equal(response.status, 201);
+      assert.equal(body.success, true);
+      assert.ok(body.data.update_id);
+    });
+
     it('POST /pets/:pet_id/updates rejects updates for pets that are not adopted', async () => {
       const form = await createUpdateForm();
       await expectApiError(`/pets/${fixture.applicationPetId}/updates`, {
@@ -801,12 +868,13 @@ describe('Pet adoption API', () => {
       assert.equal(body.success, true);
       assert.deepEqual(
         body.data.map((update) => update.period).sort(),
-        ['1m', '1y', '3m', '6m'].sort(),
+        ['1m', '1m', '1y', '3m', '6m'].sort(),
       );
       assert.ok(body.data.every((update, index) => (
         index === 0
         || new Date(body.data[index - 1].created_at) >= new Date(update.created_at)
       )));
+      assert.ok(body.data.every((update) => update.pet_id === fixture.adoptedPetId));
       assert.ok(body.data.every((update) => update.images.length === 3));
     });
   });

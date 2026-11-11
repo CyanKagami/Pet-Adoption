@@ -137,7 +137,7 @@ export interface ApiErrorResponse {
 | `breed` | `string` | No | Optional |
 | `health_history`| `json / string`| No | JSON stringified object |
 | `conditions` | `string` | No | Text description |
-| `images` | `file[]` | No | Max 5 image files (jpg/png) |
+| `images` | `file[]` | No | Max 5 JPEG/PNG image files, up to 5 MB per file |
 
 #### Responses
 * **`201 Created`**
@@ -151,7 +151,7 @@ export interface ApiErrorResponse {
     }
   }
   ```
-* **`400 Bad Request`** — Invalid input or missing required fields.
+* **`400 Bad Request`** — Invalid input or missing required fields. Unsupported image types and files over 5 MB are rejected.
 
 ---
 
@@ -397,7 +397,7 @@ export interface ApiErrorResponse {
 |---|---|---|---|
 | `period` | `string` | **Yes** | Enum: `1m`, `3m`, `6m`, `1y` |
 | `description` | `string` | **Yes** | Details on pet's life/health |
-| `images` | `file[]` | **Yes** | Requires 3 to 5 images |
+| `images` | `file[]` | **Yes** | Requires 3 to 5 JPEG/PNG images, up to 5 MB per file |
 
 #### Responses
 * **`201 Created`**
@@ -410,7 +410,7 @@ export interface ApiErrorResponse {
     }
   }
   ```
-* **`400 Bad Request`** — Image count outside 3-5 range or invalid period.
+* **`400 Bad Request`** — Image count outside 3-5 range, unsupported image type, file over 5 MB, missing description, or invalid period.
 
 ---
 
@@ -432,6 +432,7 @@ export interface ApiErrorResponse {
     "data": [
       {
         "id": "b11d41c0-302a-4318-bc10-ee88273a5b01",
+        "pet_id": "c62f275e-851f-4bb2-b5e8-5d27d7f7fa04",
         "period": "1m",
         "description": "Milo adjusted very well to the new home!",
         "images": [

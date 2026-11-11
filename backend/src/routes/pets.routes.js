@@ -21,7 +21,11 @@ function createPetsRouter(prisma) {
     }),
     limits: { fileSize: 5 * 1024 * 1024, files: 5 },
     fileFilter: (_request, file, callback) => {
-      callback(null, ['image/jpeg', 'image/png'].includes(file.mimetype));
+      if (!['image/jpeg', 'image/png'].includes(file.mimetype)) {
+        callback(apiError('INVALID_IMAGES', 'Only JPEG and PNG images are allowed'));
+        return;
+      }
+      callback(null, true);
     },
   });
 
