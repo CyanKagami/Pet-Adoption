@@ -27,7 +27,30 @@ const fixture = {
   ownerToken: jwt.sign({ id: ownerId }, jwtSecret, { expiresIn: '5m' }),
   applicantToken: jwt.sign({ id: applicantId }, jwtSecret, { expiresIn: '5m' }),
 };
-const uploadedTestFiles = new Set();
+const uploadDirectories = {
+  pets: path.resolve(__dirname, '..', 'uploads', 'pets'),
+  updates: path.resolve(__dirname, '..', 'uploads', 'updates'),
+};
+const uploadedTestFiles = new Map(
+  Object.keys(uploadDirectories).map((type) => [type, new Set()]),
+);
+
+async function snapshotUploads() {
+  const snapshot = new Map();
+  for (const [type, directory] of Object.entries(uploadDirectories)) {
+    snapshot.set(type, new Set(await fs.readdir(directory)));
+  }
+  return snapshot;
+}
+
+async function trackNewUploads(snapshot) {
+  for (const [type, directory] of Object.entries(uploadDirectories)) {
+    const filesAfter = await fs.readdir(directory);
+    for (const filename of filesAfter) {
+      if (!snapshot.get(type).has(filename)) uploadedTestFiles.get(type).add(filename);
+    }
+  }
+}
 
 async function request(path, { token, ...options } = {}) {
   const headers = new Headers(options.headers);
@@ -36,21 +59,26 @@ async function request(path, { token, ...options } = {}) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
-    headers,
-    signal: AbortSignal.timeout(10000),
-  });
-  const text = await response.text();
-  let body;
-
+  const uploadSnapshot = options.body instanceof FormData ? await snapshotUploads() : null;
   try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    body = text;
-  }
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...options,
+      headers,
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = await response.text();
+    let body;
 
-  return { response, body };
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = text;
+    }
+
+    return { response, body };
+  } finally {
+    if (uploadSnapshot) await trackNewUploads(uploadSnapshot);
+  }
 }
 
 async function expectApiError(path, { status, code, ...options }) {
@@ -85,19 +113,6 @@ async function createUpdateForm({
     );
   }
   return form;
-}
-
-async function trackUpdateUploads(run) {
-  const uploadDirectory = path.resolve(__dirname, '..', 'uploads', 'updates');
-  const filesBefore = new Set(await fs.readdir(uploadDirectory));
-  try {
-    return await run();
-  } finally {
-    const filesAfter = await fs.readdir(uploadDirectory);
-    for (const filename of filesAfter) {
-      if (!filesBefore.has(filename)) uploadedTestFiles.add(filename);
-    }
-  }
 }
 
 describe('Pet adoption API', () => {
@@ -140,34 +155,42 @@ describe('Pet adoption API', () => {
     const cleanupErrors = [];
     try {
       const { rows } = await pool.query(
-        'SELECT images FROM pet_updates WHERE pet_id = ANY($1::text[])',
-        [[fixture.adoptedPetId]],
+        `SELECT 'pets' AS upload_type, image_url
+           FROM pet_images
+          WHERE pet_id IN (SELECT id FROM pets WHERE owner_id = $1)
+         UNION ALL
+         SELECT 'updates' AS upload_type, update_image.image_url
+           FROM pet_updates
+           CROSS JOIN LATERAL jsonb_array_elements_text(pet_updates.images) AS update_image(image_url)
+          WHERE pet_updates.pet_id = ANY($2::text[])`,
+        [ownerId, [fixture.adoptedPetId]],
       );
-      const uploadDirectory = path.resolve(__dirname, '..', 'uploads', 'updates');
-      const filenames = new Set(uploadedTestFiles);
       for (const row of rows) {
-        for (const imageUrl of row.images) {
-          const filename = path.basename(imageUrl);
-          if (imageUrl.startsWith('/uploads/updates/') && filename === imageUrl.slice('/uploads/updates/'.length)) {
-            filenames.add(filename);
-          }
-        }
-      }
-      for (const filename of filenames) {
-        try {
-          await fs.unlink(path.join(uploadDirectory, filename));
-        } catch (error) {
-          if (error.code !== 'ENOENT') cleanupErrors.push(error);
+        const prefix = `/uploads/${row.upload_type}/`;
+        const filename = path.basename(row.image_url);
+        if (row.image_url.startsWith(prefix) && filename === row.image_url.slice(prefix.length)) {
+          uploadedTestFiles.get(row.upload_type).add(filename);
         }
       }
     } catch (error) {
       cleanupErrors.push(error);
-    } finally {
-      try {
-        await pool.query('DELETE FROM users WHERE id = ANY($1::text[])', [[ownerId, applicantId]]);
-      } catch (error) {
-        cleanupErrors.push(error);
+    }
+
+    for (const [type, filenames] of uploadedTestFiles) {
+      for (const filename of filenames) {
+        try {
+          await fs.unlink(path.join(uploadDirectories[type], filename));
+        } catch (error) {
+          if (error.code !== 'ENOENT') cleanupErrors.push(error);
+        }
       }
+    }
+
+    try {
+      await pool.query('DELETE FROM users WHERE id = ANY($1::text[])', [[ownerId, applicantId]]);
+    } catch (error) {
+      cleanupErrors.push(error);
+    } finally {
       try {
         await pool.end();
       } catch (error) {
@@ -700,86 +723,74 @@ describe('Pet adoption API', () => {
 
     it('POST /pets/:pet_id/updates returns 404 for an unknown pet', async () => {
       const form = await createUpdateForm();
-      await trackUpdateUploads(async () => {
-        await expectApiError(`/pets/${randomUUID()}/updates`, {
-          status: 404,
-          code: 'PET_NOT_FOUND',
-          method: 'POST',
-          token: fixture.applicantToken,
-          body: form,
-        });
+      await expectApiError(`/pets/${randomUUID()}/updates`, {
+        status: 404,
+        code: 'PET_NOT_FOUND',
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: form,
       });
     });
 
     it('POST /pets/:pet_id/updates rejects more than five images', async () => {
       const form = await createUpdateForm({ imageCount: 6 });
-      await trackUpdateUploads(async () => {
-        const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
-          method: 'POST',
-          token: fixture.applicantToken,
-          body: form,
-        });
-
-        assert.equal(response.status, 400);
-        assert.equal(body.success, false);
-        assert.equal(body.error.code, 'INVALID_IMAGES');
+      const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: form,
       });
+
+      assert.equal(response.status, 400);
+      assert.equal(body.success, false);
+      assert.equal(body.error.code, 'INVALID_IMAGES');
     });
 
     it('POST /pets/:pet_id/updates rejects an image larger than five megabytes', async () => {
       const form = await createUpdateForm({ imageCount: 1, imageSize: 5 * 1024 * 1024 + 1 });
-      await trackUpdateUploads(async () => {
-        await expectApiError(`/pets/${fixture.adoptedPetId}/updates`, {
-          status: 400,
-          code: 'LIMIT_FILE_SIZE',
-          method: 'POST',
-          token: fixture.applicantToken,
-          body: form,
-        });
+      await expectApiError(`/pets/${fixture.adoptedPetId}/updates`, {
+        status: 400,
+        code: 'LIMIT_FILE_SIZE',
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: form,
       });
     });
 
     it('POST /pets/:pet_id/updates rejects updates for pets that are not adopted', async () => {
       const form = await createUpdateForm();
-      await trackUpdateUploads(async () => {
-        await expectApiError(`/pets/${fixture.petId}/updates`, {
-          status: 400,
-          code: 'PET_NOT_ADOPTED',
-          method: 'POST',
-          token: fixture.applicantToken,
-          body: form,
-        });
+      await expectApiError(`/pets/${fixture.applicationPetId}/updates`, {
+        status: 400,
+        code: 'PET_NOT_ADOPTED',
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: form,
       });
     });
 
     it('POST /pets/:pet_id/updates rejects a user who is not the approved adopter', async () => {
       const form = await createUpdateForm();
-      await trackUpdateUploads(async () => {
-        await expectApiError(`/pets/${fixture.adoptedPetId}/updates`, {
-          status: 403,
-          code: 'FORBIDDEN',
-          method: 'POST',
-          token: fixture.ownerToken,
-          body: form,
-        });
+      await expectApiError(`/pets/${fixture.adoptedPetId}/updates`, {
+        status: 403,
+        code: 'FORBIDDEN',
+        method: 'POST',
+        token: fixture.ownerToken,
+        body: form,
       });
     });
 
     it('POST /pets/:pet_id/updates accepts all documented periods for the approved adopter', async () => {
       for (const period of ['1m', '3m', '6m', '1y']) {
         const form = await createUpdateForm({ period });
-        await trackUpdateUploads(async () => {
-          const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
-            method: 'POST',
-            token: fixture.applicantToken,
-            body: form,
-          });
-
-          assert.equal(response.status, 201);
-          assert.equal(body.success, true);
-          assert.ok(body.data.update_id);
-          assert.ok(body.data.created_at);
+        const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
+          method: 'POST',
+          token: fixture.applicantToken,
+          body: form,
         });
+
+        assert.equal(response.status, 201);
+        assert.equal(body.success, true);
+        assert.ok(body.data.update_id);
+        assert.ok(body.data.created_at);
       }
     });
 

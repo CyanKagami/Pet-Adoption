@@ -34,7 +34,10 @@ app.use((error, _request, response, _next) => {
   if (error instanceof multer.MulterError) {
     return response.status(400).json({
       success: false,
-      error: { code: error.code === 'LIMIT_UNEXPECTED_FILE' ? 'INVALID_IMAGES' : error.code, message: error.message },
+      error: {
+        code: ['LIMIT_UNEXPECTED_FILE', 'LIMIT_FILE_COUNT'].includes(error.code) ? 'INVALID_IMAGES' : error.code,
+        message: error.message,
+      },
     });
   }
 
