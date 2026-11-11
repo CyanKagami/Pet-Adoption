@@ -7,6 +7,11 @@ const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
 const { createPetsRouter } = require('./src/routes/pets.routes');
+const { createApplicationsRouter } = require('./src/routes/applications.routes');
+const { createWishlistsRouter } = require('./src/routes/wishlists.routes');
+const { createUpdatesRouter } = require('./src/routes/updates.routes');
+const { createMessagesRouter } = require('./src/routes/messages.routes');
+const { createReviewsRouter } = require('./src/routes/reviews.routes');
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
@@ -18,7 +23,12 @@ const prisma = new PrismaClient({ adapter });
 
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(`${api}/pets`, createApplicationsRouter(prisma));
+app.use(`${api}/pets`, createUpdatesRouter(prisma));
 app.use(`${api}/pets`, createPetsRouter(prisma));
+app.use(`${api}/wishlists`, createWishlistsRouter(prisma));
+app.use(`${api}/chats`, createMessagesRouter(prisma));
+app.use(`${api}/reviews`, createReviewsRouter(prisma));
 
 app.use((error, _request, response, _next) => {
   if (error instanceof multer.MulterError) {

@@ -1,0 +1,110 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const { createRequireAuth } = require('../middlewares/auth');
+const { apiError, asyncHandler } = require('../utils/http');
+
+function createUpdatesRouter(prisma) {
+  const router = express.Router();
+  const requireAuth = createRequireAuth(prisma);
+  const uploadDirectory = path.join(__dirname, '..', '..', 'uploads', 'updates');
+  fs.mkdirSync(uploadDirectory, { recursive: true });
+
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: uploadDirectory,
+      filename: (_request, file, callback) => {
+        const extension = path.extname(file.originalname).toLowerCase();
+        callback(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+    fileFilter: (_request, file, callback) => {
+      callback(null, ['image/jpeg', 'image/png'].includes(file.mimetype));
+    },
+  });
+
+  router.get('/:pet_id/updates', asyncHandler(async (request, response) => {
+    const pet = await prisma.pet.findUnique({
+      where: { id: request.params.pet_id },
+      select: { id: true },
+    });
+    if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+
+    const updates = await prisma.petUpdate.findMany({
+      where: { petId: pet.id },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    response.json({
+      success: true,
+      data: updates.map((update) => ({
+        id: update.id,
+        period: update.updatePeriod,
+        description: update.description,
+        images: update.images.map((image) => (
+          image.startsWith('http')
+            ? image
+            : `${request.protocol}://${request.get('host')}${image}`
+        )),
+        created_at: update.createdAt.toISOString(),
+      })),
+    });
+  }));
+
+  router.post(
+    '/:pet_id/updates',
+    requireAuth,
+    upload.array('images', 5),
+    asyncHandler(async (request, response) => {
+      const { period, description } = request.body || {};
+      if (!['1m', '3m', '6m', '1y'].includes(period)) {
+        throw apiError('INVALID_PERIOD', 'period must be 1m, 3m, 6m, or 1y');
+      }
+      if (typeof description !== 'string' || !description.trim()) {
+        throw apiError('INVALID_DESCRIPTION', 'description is required');
+      }
+
+      const images = request.files || [];
+      if (images.length < 3 || images.length > 5) {
+        throw apiError('INVALID_IMAGES', 'An update must include 3 to 5 images');
+      }
+
+      const pet = await prisma.pet.findUnique({
+        where: { id: request.params.pet_id },
+        select: { id: true, status: true },
+      });
+      if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+      if (pet.status !== 'ADOPTED') {
+        throw apiError('PET_NOT_ADOPTED', 'Updates can only be posted for adopted pets', undefined, 400);
+      }
+
+      const adoption = await prisma.application.findFirst({
+        where: { petId: pet.id, applicantId: request.user.id, status: 'APPROVED' },
+        select: { id: true },
+      });
+      if (!adoption) {
+        throw apiError('FORBIDDEN', 'Only the approved adopter can post updates', undefined, 403);
+      }
+
+      const update = await prisma.petUpdate.create({
+        data: {
+          petId: pet.id,
+          updatePeriod: period,
+          description: description.trim(),
+          images: images.map((image) => `/uploads/updates/${image.filename}`),
+        },
+      });
+
+      response.status(201).json({
+        success: true,
+        data: { update_id: update.id, created_at: update.createdAt.toISOString() },
+      });
+    }),
+  );
+
+  return router;
+}
+
+module.exports = { createUpdatesRouter };
