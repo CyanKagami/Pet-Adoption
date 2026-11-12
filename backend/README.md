@@ -12,6 +12,19 @@ The API test command runs all suites by default. To run one suite, pass its name
 | `reviews` | Creating and validating user reviews |
 | `all` | Run every suite (default) |
 
+## Authentication
+
+The frontend uses these endpoints under `/api/v1/auth`:
+
+| Method and path | Request | Response |
+| --- | --- | --- |
+| `POST /` | `{ "action": "login", "email": "...", "password": "..." }` | `{ success, message, user, token }` |
+| `POST /` | `{ "action": "register", "email": "...", "password": "...", "fullName": "...", "phoneNumber?": "...", "profileImage?": "..." }` | `{ success, message, user, token }` |
+| `GET /me` | Authentication cookie or bearer token | `{ success: true, user }` or `{ success: false, user: null }` |
+| `POST /logout` | None | `{ success, message }` |
+
+Login and registration set the `HttpOnly` `auth_token` cookie used by `/me` and protected routes. They also return the token in the response for API clients.
+
 ## Run locally
 
 From the `backend` directory:
@@ -24,6 +37,7 @@ npm run test:api -- --suite wishlists
 npm run test:api -- --suite updates
 npm run test:api -- --suite messaging
 npm run test:api -- --suite reviews
+npm run test:auth
 ```
 
 ## Run with Docker Compose
