@@ -301,7 +301,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
                     }`}
                   >
                     <Heart className={`w-4 h-4 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
-                    <span>{isWishlisted ? 'บันทึกแล้ว' : '♡ Wishlist'}</span>
+                    <span>{isWishlisted ? 'บันทึกแล้ว' : 'Wishlist'}</span>
                   </Button>
 
                   {/* ปุ่ม 2: แชทสอบถาม (หากเป็นเจ้าของประกาศ จะปิดใช้งานไม่ให้คุยกับตัวเอง) */}
@@ -373,7 +373,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
                 </div>
                 <div>
                   <p className="font-semibold text-foreground flex items-center gap-1.5">
-                    {pet.owner?.fullName || 'คุณมานี'}
+                    {pet.owner?.fullName || 'ผู้ลงประกาศ'}
                     {pet.owner?.isVerified && (
                       <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
                     )}
@@ -384,62 +384,81 @@ function PetDetailContent({ params }: PetDetailPageProps) {
 
               <div className="pt-2 border-t border-border/60 space-y-1.5 text-muted-foreground">
                 <p>สมัครเมื่อ: <span className="text-foreground font-medium">{ownerJoinedDate}</span></p>
-                <p>ประกาศที่เคยลง: <span className="text-foreground font-medium">{pet.ownerStats?.totalPets || 8} ประกาศ</span></p>
+                <p>ประกาศที่เคยลง: <span className="text-foreground font-medium">{pet.ownerStats?.totalPets ?? 1} ประกาศ</span></p>
                 <p className="flex items-center gap-1.5">
                   ยืนยันตัวตน: 
                   <span className="text-green-600 font-medium inline-flex items-center gap-1">
-                    ✓ ยืนยันแล้ว
+                    {pet.owner?.isVerified ? '✓ ยืนยันแล้ว' : 'ยืนยันตัวตนแล้ว ✓'}
                   </span>
                 </p>
                 <p className="flex items-center gap-1">
                   คะแนนเฉลี่ย: 
-                  <span className="text-amber-500 font-bold ml-1">★ {pet.ownerStats?.averageRating || '4.6'}</span>
-                  <span className="text-xs text-muted-foreground">({pet.ownerStats?.totalReviews || 12} รีวิว)</span>
+                  <span className="text-amber-500 font-bold ml-1">★ {pet.ownerStats?.averageRating || '5.0'}</span>
+                  <span className="text-xs text-muted-foreground">({pet.ownerStats?.totalReviews ?? 0} รีวิว)</span>
                 </p>
               </div>
             </div>
           </div>
 
-          {/* การ์ดขวา: รีวิวผู้โพสต์ (FR-10) ตาม Wireframe */}
+          {/* การ์ดขวา: รีวิวผู้โพสต์ (FR-10) ดึงจากฐานข้อมูลจริง */}
           <div className="bg-white border border-border rounded-xl p-6 shadow-2xs space-y-4 flex flex-col justify-between">
             <div className="space-y-4">
-              <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์ (FR-10)</h2>
-
-              {/* รายการรีวิว */}
-              <div className="space-y-3.5 text-sm">
-                {/* รีวิวที่ 1 */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-amber-400 text-xs tracking-wider">★★★★★</span>
-                    <span className="font-semibold text-foreground">คุณสมชาย</span>
-                  </div>
-                  <p className="text-muted-foreground text-xs italic pl-0.5">
-                    &apos;ดูแลสัตว์ดีมาก ข้อมูลตรงตามจริง&apos;
-                  </p>
-                </div>
-
-                {/* รีวิวที่ 2 */}
-                <div className="space-y-1 pt-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-amber-400 text-xs tracking-wider">★★★★☆</span>
-                    <span className="font-semibold text-foreground">คุณใจดี</span>
-                  </div>
-                  <p className="text-muted-foreground text-xs italic pl-0.5">
-                    &apos;ตอบแชทเร็ว&apos;
-                  </p>
-                </div>
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์ (FR-10)</h2>
+                {currentUser && currentUser.id !== (pet.owner?.id || pet.ownerId) && (
+                  <Link
+                    href={`/reviews?targetUserId=${pet.owner?.id || pet.ownerId}&targetUserName=${encodeURIComponent(
+                      pet.owner?.fullName || 'ผู้โพสต์'
+                    )}&petName=${encodeURIComponent(pet.name)}&role=owner`}
+                    className="text-xs text-blue-600 hover:underline font-medium"
+                  >
+                    + เขียนรีวิว
+                  </Link>
+                )}
               </div>
+
+              {/* รายการรีวิวจริงจากฐานข้อมูล */}
+              {pet.ownerStats?.reviews && pet.ownerStats.reviews.length > 0 ? (
+                <div className="space-y-3 text-sm">
+                  {pet.ownerStats.reviews.slice(0, 3).map((rev: any) => (
+                    <div key={rev.id} className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 text-xs tracking-wider">
+                          {'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}
+                        </span>
+                        <span className="font-semibold text-foreground text-xs">{rev.reviewerName}</span>
+                      </div>
+                      <p className="text-muted-foreground text-xs italic pl-0.5">
+                        &apos;{rev.comment}&apos;
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-4 text-center text-xs text-muted-foreground">
+                  ยังไม่มีรีวิวสำหรับผู้ลงประกาศนี้ คุณสามารถเขียนรีวิวเพื่อให้ข้อเสนอแนะได้
+                </div>
+              )}
             </div>
 
             {/* ลิงก์ดูรีวิวทั้งหมด */}
-            <div className="pt-3 border-t border-border/60">
-              <button
-                type="button"
-                onClick={() => alert('แสดงรีวิวทั้งหมดของผู้โพสต์')}
+            <div className="pt-3 border-t border-border/60 flex items-center justify-between">
+              <Link
+                href={`/reviews?targetUserId=${pet.owner?.id || pet.ownerId}&targetUserName=${encodeURIComponent(
+                  pet.owner?.fullName || 'ผู้โพสต์'
+                )}&petName=${encodeURIComponent(pet.name)}`}
                 className="text-xs text-muted-foreground hover:text-foreground underline transition-colors cursor-pointer"
               >
-                (ดูรีวิวทั้งหมด)
-              </button>
+                (ดูรีวิวทั้งหมด {pet.ownerStats?.totalReviews ? `(${pet.ownerStats.totalReviews})` : ''})
+              </Link>
+              {pet.status === 'adopted' && (
+                <Link
+                  href={`/pets/${pet.id}/updates`}
+                  className="text-xs text-indigo-600 hover:underline font-medium"
+                >
+                  ดูรูปอัปเดตความเป็นอยู่ →
+                </Link>
+              )}
             </div>
           </div>
         </div>

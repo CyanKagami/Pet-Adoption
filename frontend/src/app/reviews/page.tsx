@@ -47,11 +47,16 @@ function ReviewContent() {
   const fetchRealReviews = async () => {
     try {
       setLoadingReviews(true);
-      const res = await api.reviews.getAll();
-      if (res.success && Array.isArray(res.data)) {
+      const res = await api.reviews.getAll(targetUserIdParam || undefined);
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
         setExistingReviews(res.data);
       } else {
-        setExistingReviews([]);
+        const allRes = await api.reviews.getAll();
+        if (allRes.success && Array.isArray(allRes.data)) {
+          setExistingReviews(allRes.data);
+        } else {
+          setExistingReviews([]);
+        }
       }
     } catch (err) {
       console.error('Failed to load reviews:', err);

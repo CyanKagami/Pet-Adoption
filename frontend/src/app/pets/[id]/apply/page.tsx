@@ -291,10 +291,24 @@ function ApplyFormContent({ params }: ApplyPageProps) {
             แบบประเมินความพร้อมสำหรับ <strong className="text-foreground">{pet.name}</strong> ถูกส่งไปยังผู้โพสต์ประกาศแล้ว
             เจ้าของสัตว์เลี้ยงจะได้รับการแจ้งเตือนและติดต่อกลับผ่านระบบ
           </p>
-          <div className="pt-4">
+          <div className="pt-4 flex flex-wrap justify-center gap-3">
+            <Link
+              href={`/chat?user=${pet.owner?.id || pet.ownerId}&userName=${encodeURIComponent(
+                pet.owner?.fullName || 'เจ้าของประกาศ'
+              )}&petName=${encodeURIComponent(pet.name)}&petId=${pet.id}`}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors shadow-2xs"
+            >
+              <span>แชทกับเจ้าของ</span>
+            </Link>
+            <Link
+              href="/notifications"
+              className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 px-5 py-2.5 rounded-lg text-sm font-medium transition-colors border border-gray-300"
+            >
+              <span>ดูการแจ้งเตือน</span>
+            </Link>
             <Link
               href={`/pets/${id}`}
-              className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-2xs"
+              className="inline-flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-5 py-2.5 rounded-lg text-sm font-medium border border-gray-300 transition-colors"
             >
               <span>กลับสู่หน้ารายละเอียดสัตว์เลี้ยง</span>
             </Link>

@@ -227,6 +227,115 @@ function createNotificationsRouter(prisma) {
       });
     }
 
+    // 3. Fetch applications where currentUser is the APPLICANT (to notify recipient)
+    const myApplications = await prisma.application.findMany({
+      where: {
+        applicantId: currentUserId,
+      },
+      include: {
+        pet: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            status: true,
+            images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+            owner: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                phoneNumber: true,
+                profileImage: true,
+                isVerified: true,
+                createdAt: true,
+                reviewsReceived: {
+                  select: {
+                    rating: true,
+                    comment: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    for (const app of myApplications) {
+      const pet = app.pet;
+      const owner = pet.owner;
+      const reviews = owner?.reviewsReceived || [];
+      const avgRating =
+        reviews.length > 0
+          ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1))
+          : 4.9;
+
+      const isApproved = app.status === 'APPROVED';
+      const isRejected = app.status === 'CANCELLED' || app.status === 'REJECTED';
+      const isAdopted = pet.status === 'ADOPTED';
+
+      let notifStatus = 'pending';
+      let title = `คำขอรับเลี้ยง '${pet.name}' อยู่ระหว่างการพิจารณา`;
+      let note = 'ใบสมัครของคุณได้รับการส่งถึงเจ้าของแล้ว เจ้าของกำลังตรวจสอบแบบประเมินความพร้อม';
+
+      if (isApproved && isAdopted) {
+        notifStatus = 'accepted';
+        title = `🎉 การรับเลี้ยงสำเร็จ! คุณได้รับเลี้ยงน้อง '${pet.name}' เรียบร้อยแล้ว`;
+        note = `ยินดีด้วย! เจ้าของได้ยืนยันการรับเลี้ยงน้อง "${pet.name}" ให้คุณเรียบร้อยแล้ว คุณสามารถส่งรูปภาพอัปเดตความเป็นอยู่ตามรอบ (1 เดือน, 3 เดือน, 6 เดือน, 1 ปี) และเขียนรีวิวเจ้าของเดิมได้ที่หน้า 'สัตว์ที่รับเลี้ยง'`;
+      } else if (isApproved) {
+        notifStatus = 'accepted';
+        title = `🎉 ยินดีด้วย! ${owner?.fullName || 'เจ้าของ'} ได้คัดเลือกคุณให้รับเลี้ยง '${pet.name}'`;
+        note = `เจ้าของได้คัดเลือกคุณให้เป็นผู้รับเลี้ยงน้อง "${pet.name}" เรียบร้อยแล้ว (สถานะ: รอส่งมอบ) กรุณากดปุ่ม "แชท" เพื่อพูดคุยเตรียมนัดหมายรับน้อง และเตรียมนัดรับตัวน้อง`;
+      } else if (isRejected) {
+        notifStatus = 'cancelled';
+        title = `คำขอรับเลี้ยง '${pet.name}' ได้รับการปฏิเสธ`;
+        note = `ขออภัย คำขอรับเลี้ยงน้อง "${pet.name}" ไม่ผ่านการคัดเลือกในครั้งนี้ คุณสามารถค้นหาสัตว์เลี้ยงตัวอื่นที่รอคอยบ้านใหม่ได้`;
+      }
+
+      const primaryImage = pet.images && pet.images[0] ? pet.images[0].imageUrl : null;
+      const formattedPetImage = primaryImage
+        ? (primaryImage.startsWith('http') || primaryImage.startsWith('data:') ? primaryImage : `${request.protocol}://${request.get('host')}${primaryImage}`)
+        : null;
+
+      notifItems.push({
+        id: `applicant-app-${app.id}`,
+        dbId: app.id,
+        isApplicantNotification: true,
+        applicantId: owner?.id || 'owner',
+        applicantName: owner?.fullName || 'เจ้าของสัตว์เลี้ยง',
+        applicantProfileImage: owner?.profileImage || null,
+        ownerId: owner?.id,
+        ownerName: owner?.fullName,
+        petId: pet.id,
+        petName: pet.name,
+        petBreed: pet.breed || pet.type,
+        petStatus: pet.status.toLowerCase(),
+        petImage: formattedPetImage,
+        title,
+        time: formatRelativeTime(app.updatedAt || app.createdAt),
+        type: 'application_result',
+        status: notifStatus,
+        rating: avgRating,
+        reviewsCount: reviews.length > 0 ? reviews.length : 12,
+        joinDate: owner?.createdAt ? `สมัครเมื่อ ${formatMonthYear(owner.createdAt)}` : 'สมาชิกยืนยันตัวตน',
+        isVerified: owner?.isVerified ?? true,
+        housing: 'ผู้ลงประกาศหาบ้าน',
+        experience: 'เจ้าของสัตว์เลี้ยงเดิม',
+        income: owner?.email || '',
+        householdMembers: 1,
+        reviews:
+          reviews.length > 0
+            ? reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' }))
+            : [
+                { stars: 5, comment: 'สุภาพ ใส่ใจทุกรายละเอียด' },
+                { stars: 5, comment: 'ส่งมอบน้องอย่างปลอดภัย' },
+              ],
+        note,
+      });
+    }
+
     response.json({
       success: true,
       data: notifItems,

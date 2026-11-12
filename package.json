@@ -1,0 +1,18 @@
+{
+  "name": "pet-adoption-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pet Adoption Platform with Decoupled Express Backend and Next.js Frontend",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "test:api": "cd backend && npm run test:api",
+    "mockData": "cd backend && npm run mockData",
+    "mockUser": "cd backend && npm run mockUser",
+    "delData": "cd backend && npm run delData",
+    "seed": "cd backend && npm run seed",
+    "prisma:generate": "cd backend && npm run prisma:generate"
+  }
+}

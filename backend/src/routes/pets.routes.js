@@ -30,7 +30,9 @@ function createPetsRouter(prisma) {
   });
 
   function normalizeStatus(status) {
-    return status === 'ADOPTED' ? 'adopted' : 'available';
+    if (status === 'ADOPTED') return 'adopted';
+    if (status === 'PENDING') return 'pending';
+    return 'available';
   }
 
   function imageUrl(request, image) {
@@ -66,6 +68,7 @@ function createPetsRouter(prisma) {
         email: pet.owner?.email,
         profileImage: pet.owner?.profileImage,
         isVerified: pet.owner?.isVerified,
+        createdAt: pet.owner?.createdAt ? pet.owner.createdAt.toISOString() : undefined,
       };
     }
 
@@ -188,10 +191,15 @@ function createPetsRouter(prisma) {
   }));
 
   router.post('/', requireAuth, upload.array('images', 5), asyncHandler(async (request, response) => {
-    const { name, type, location, breed, conditions } = request.body;
+    let { name, type, location, breed, conditions, gender, ageMonths, description } = request.body || {};
     if (typeof name !== 'string' || name.trim().length < 2) {
       throw apiError('INVALID_NAME', 'name must contain at least 2 characters');
     }
+
+    if (type === 'สุนัข') type = 'Dog';
+    else if (type === 'แมว') type = 'Cat';
+    else if (type === 'อื่นๆ') type = 'Other';
+
     if (!['Dog', 'Cat', 'Other'].includes(type)) {
       throw apiError('INVALID_TYPE', 'type must be Dog, Cat, or Other');
     }
@@ -199,10 +207,27 @@ function createPetsRouter(prisma) {
       throw apiError('INVALID_LOCATION', 'location is required');
     }
 
-    const healthHistory = parseHealthHistory(request.body.health_history);
+    const healthHistory = parseHealthHistory(request.body.health_history || request.body.healthHistory);
     if (healthHistory !== undefined && (healthHistory === null || typeof healthHistory !== 'object' || Array.isArray(healthHistory))) {
       throw apiError('INVALID_HEALTH_HISTORY', 'health_history must be a valid JSON object');
     }
+
+    let imageCreates = [];
+    if (request.files && request.files.length > 0) {
+      imageCreates = request.files.map((file, index) => ({
+        imageUrl: `/uploads/pets/${file.filename}`,
+        isPrimary: index === 0,
+      }));
+    } else if (Array.isArray(request.body.images) && request.body.images.length > 0) {
+      imageCreates = request.body.images.map((img, index) => ({
+        imageUrl: typeof img === 'string' ? img : (img.imageUrl || ''),
+        isPrimary: index === 0,
+      }));
+    }
+
+    const adoptionConditions = typeof conditions === 'string' && conditions.trim()
+      ? conditions.trim()
+      : (typeof request.body.adoptionConditions === 'string' && request.body.adoptionConditions.trim() ? request.body.adoptionConditions.trim() : null);
 
     const pet = await prisma.pet.create({
       data: {
@@ -211,20 +236,23 @@ function createPetsRouter(prisma) {
         type,
         location: location.trim(),
         breed: typeof breed === 'string' && breed.trim() ? breed.trim() : null,
+        gender: typeof gender === 'string' && gender.trim() ? gender.trim() : null,
+        ageMonths: ageMonths !== undefined && ageMonths !== null && !isNaN(Number(ageMonths)) ? Number(ageMonths) : null,
+        description: typeof description === 'string' && description.trim() ? description.trim() : null,
         healthInfo: healthHistory,
-        adoptionConditions: typeof conditions === 'string' && conditions.trim() ? conditions.trim() : null,
-        images: {
-          create: (request.files || []).map((file, index) => ({
-            imageUrl: `/uploads/pets/${file.filename}`,
-            isPrimary: index === 0,
-          })),
-        },
+        adoptionConditions,
+        images: imageCreates.length > 0 ? { create: imageCreates } : undefined,
       },
     });
 
     response.status(201).json({
       success: true,
-      data: { pet_id: pet.id, status: 'available', created_at: pet.createdAt.toISOString() },
+      data: {
+        pet_id: pet.id,
+        id: pet.id,
+        status: 'available',
+        created_at: pet.createdAt.toISOString(),
+      },
     });
   }));
 
@@ -232,13 +260,52 @@ function createPetsRouter(prisma) {
     const pet = await prisma.pet.findUnique({
       where: { id: request.params.pet_id },
       include: {
-        owner: { select: { id: true, fullName: true, email: true } },
+        owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true, createdAt: true } },
         images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        applications: {
+          include: {
+            applicant: { select: { id: true, fullName: true, email: true, phoneNumber: true, profileImage: true, isVerified: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        updates: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
     if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
 
-    response.json({ success: true, data: serializePet(request, pet, true) });
+    const [totalPets, ownerReviews] = await Promise.all([
+      prisma.pet.count({ where: { ownerId: pet.ownerId } }),
+      prisma.review.findMany({
+        where: { targetId: pet.ownerId },
+        include: {
+          reviewer: { select: { id: true, fullName: true, profileImage: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const avgRating =
+      ownerReviews.length > 0
+        ? Number((ownerReviews.reduce((sum, r) => sum + r.rating, 0) / ownerReviews.length).toFixed(1))
+        : 5.0;
+
+    const serialized = serializePet(request, pet, true);
+    serialized.ownerStats = {
+      totalPets,
+      totalReviews: ownerReviews.length,
+      averageRating: avgRating,
+      reviews: ownerReviews.map((r) => ({
+        id: r.id,
+        rating: r.rating,
+        comment: r.comment,
+        createdAt: r.createdAt.toISOString(),
+        reviewerName: r.reviewer?.fullName || 'ผู้ใช้งาน',
+      })),
+    };
+
+    response.json({ success: true, data: serialized });
   }));
 
   router.patch('/:pet_id/status', requireAuth, asyncHandler(async (request, response) => {
@@ -248,15 +315,32 @@ function createPetsRouter(prisma) {
 
     const pet = await prisma.pet.findUnique({
       where: { id: request.params.pet_id },
-      select: { id: true, ownerId: true },
+      select: { id: true, name: true, ownerId: true },
     });
     if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
     if (pet.ownerId !== request.user.id) throw apiError('FORBIDDEN', 'Only the pet owner can update this status', undefined, 403);
 
+    const targetStatus = request.body.status === 'adopted' ? 'ADOPTED' : 'AVAILABLE';
     const updatedPet = await prisma.pet.update({
       where: { id: pet.id },
-      data: { status: request.body.status === 'adopted' ? 'ADOPTED' : 'AVAILABLE' },
+      data: { status: targetStatus },
     });
+
+    if (targetStatus === 'ADOPTED') {
+      const approvedApp = await prisma.application.findFirst({
+        where: { petId: pet.id, status: 'APPROVED' },
+        include: { applicant: true },
+      });
+      if (approvedApp) {
+        await prisma.message.create({
+          data: {
+            senderId: request.user.id,
+            receiverId: approvedApp.applicantId,
+            content: `🎉 ยืนยันการรับเลี้ยงน้อง "${pet.name}" เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ คุณสามารถเริ่มส่งรูปอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
+          },
+        }).catch(() => null);
+      }
+    }
 
     response.json({
       success: true,
@@ -285,7 +369,7 @@ function createPetsRouter(prisma) {
     if (request.body.ageMonths !== undefined) updateData.ageMonths = Number(request.body.ageMonths) || null;
     if (request.body.status) {
       const s = String(request.body.status).toUpperCase();
-      if (['AVAILABLE', 'ADOPTED'].includes(s)) {
+      if (['AVAILABLE', 'PENDING', 'ADOPTED'].includes(s)) {
         updateData.status = s;
       }
     }
@@ -298,6 +382,22 @@ function createPetsRouter(prisma) {
         owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
       },
     });
+
+    if (updateData.status === 'ADOPTED') {
+      const approvedApp = await prisma.application.findFirst({
+        where: { petId: pet.id, status: 'APPROVED' },
+        include: { applicant: true },
+      });
+      if (approvedApp) {
+        await prisma.message.create({
+          data: {
+            senderId: request.user.id,
+            receiverId: approvedApp.applicantId,
+            content: `🎉 ยืนยันการรับเลี้ยงน้อง "${pet.name}" เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ คุณสามารถเริ่มส่งรูปอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
+          },
+        }).catch(() => null);
+      }
+    }
 
     response.json({
       success: true,
