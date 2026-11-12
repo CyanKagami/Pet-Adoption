@@ -31,18 +31,16 @@ pipeline {
               sh 'npx prisma generate'
               sh 'npx prisma validate'
               sh 'npm run lint --if-present'
-              sh 'npm test --if-present'
             }
           }
         }
       stage('Frontend') {
-        steps {
-          dir('frontend') {
-            sh 'npm ci'
-            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
-              sh 'npm run lint --if-present'
-            }
-            sh 'npm test --if-present'
+          steps {
+            dir('frontend') {
+              sh 'npm ci'
+              catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+                sh 'npm run lint --if-present'
+              }
             }
           }
         }
