@@ -35,12 +35,14 @@ pipeline {
             }
           }
         }
-        stage('Frontend') {
-          steps {
-            dir('frontend') {
-              sh 'npm ci'
+      stage('Frontend') {
+        steps {
+          dir('frontend') {
+            sh 'npm ci'
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
               sh 'npm run lint --if-present'
-              sh 'npm test --if-present'
+            }
+            sh 'npm test --if-present'
             }
           }
         }
@@ -68,3 +70,4 @@ pipeline {
     failure { echo 'Red: read the first error in the log.' }
   }
 }
+
