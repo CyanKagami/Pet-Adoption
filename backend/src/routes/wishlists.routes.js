@@ -48,11 +48,14 @@ function createWishlistsRouter(prisma) {
     response.json({
       success: true,
       data: items.map(({ pet }) => {
-        const imageUrls = pet.images.map((image) => (
-          image.imageUrl.startsWith('http')
-            ? image.imageUrl
-            : `${request.protocol}://${request.get('host')}${image.imageUrl}`
-        ));
+        const imageUrls = pet.images.map((image) => {
+          if (!image || !image.imageUrl) return null;
+          const url = image.imageUrl;
+          if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+            return url;
+          }
+          return `${request.protocol}://${request.get('host')}${url.startsWith('/') ? '' : '/'}${url}`;
+        }).filter(Boolean);
         return {
           id: pet.id,
           name: pet.name,

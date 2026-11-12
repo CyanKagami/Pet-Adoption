@@ -1,6 +1,15 @@
 // src/lib/api.ts
 import { Pet, ApplicationInput, PetFilterParams } from '@/types/pet';
 
+export function cleanImageUrl(url: any): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://localhost:5000data:') || trimmed.startsWith('https://localhost:5000data:')) {
+    return trimmed.replace(/^https?:\/\/localhost:5000/, '');
+  }
+  return trimmed;
+}
+
 export const api = {
   // 1. จัดการข้อมูลสัตว์เลี้ยง
   pets: {
@@ -32,12 +41,17 @@ export const api = {
         const normalizedPets = rawPets.map((p: any) => {
           const rawImages = p.images || (p.image ? [p.image] : []);
           const normalizedImages = rawImages.map((img: any, idx: number) => {
-            if (typeof img === 'string') {
-              return { id: `img-${idx}`, petId: p.id, imageUrl: img, isPrimary: idx === 0 };
-            }
-            return img;
+            const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
+            const cleaned = cleanImageUrl(rawUrl);
+            return {
+              id: img?.id || `img-${idx}`,
+              petId: p.id,
+              imageUrl: cleaned || '',
+              isPrimary: idx === 0,
+            };
           });
-          const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          const primaryUrl = cleanImageUrl(rawPrimary);
 
           return {
             ...p,
@@ -65,12 +79,17 @@ export const api = {
         const p = json.data;
         const rawImages = p.images || (p.image ? [p.image] : []);
         const normalizedImages = rawImages.map((img: any, idx: number) => {
-          if (typeof img === 'string') {
-            return { id: `img-${idx}`, petId: p.id, imageUrl: img, isPrimary: idx === 0 };
-          }
-          return img;
+          const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
+          const cleaned = cleanImageUrl(rawUrl);
+          return {
+            id: img?.id || `img-${idx}`,
+            petId: p.id,
+            imageUrl: cleaned || '',
+            isPrimary: idx === 0,
+          };
         });
-        const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+        const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+        const primaryUrl = cleanImageUrl(rawPrimary);
 
         return {
           success: true,
@@ -220,11 +239,22 @@ export const api = {
         const rawList = Array.isArray(json.data) ? json.data : (json.data?.pets || []);
         const normalized = rawList.map((p: any) => {
           const rawImages = p.images || (p.image ? [p.image] : []);
-          const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          const normalizedImages = rawImages.map((img: any, idx: number) => {
+            const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
+            const cleaned = cleanImageUrl(rawUrl);
+            return {
+              id: img?.id || `img-${idx}`,
+              petId: p.id,
+              imageUrl: cleaned || '',
+              isPrimary: idx === 0,
+            };
+          });
+          const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          const primaryUrl = cleanImageUrl(rawPrimary);
           return {
             ...p,
             image: primaryUrl,
-            images: rawImages,
+            images: normalizedImages,
             status: (p.status || 'AVAILABLE').toLowerCase(),
           };
         });

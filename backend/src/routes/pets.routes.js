@@ -36,9 +36,12 @@ function createPetsRouter(prisma) {
   }
 
   function imageUrl(request, image) {
-    return image.imageUrl.startsWith('http')
-      ? image.imageUrl
-      : `${request.protocol}://${request.get('host')}${image.imageUrl}`;
+    if (!image || !image.imageUrl) return null;
+    const url = image.imageUrl;
+    if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    return `${request.protocol}://${request.get('host')}${url.startsWith('/') ? '' : '/'}${url}`;
   }
 
   function serializePet(request, pet, includeOwner = false) {

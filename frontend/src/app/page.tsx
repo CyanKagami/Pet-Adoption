@@ -297,13 +297,17 @@ export default function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {pets.map((pet) => {
                 const isWishlisted = wishlist.has(pet.id);
-                const primaryImage =
+                let rawImg =
                   pet.image ||
                   (pet.images && pet.images.length > 0
                     ? typeof pet.images[0] === 'string'
                       ? pet.images[0]
                       : pet.images[0].imageUrl
                     : null);
+                if (typeof rawImg === 'string' && (rawImg.startsWith('http://localhost:5000data:') || rawImg.startsWith('https://localhost:5000data:'))) {
+                  rawImg = rawImg.replace(/^https?:\/\/localhost:5000/, '');
+                }
+                const primaryImage = rawImg;
 
                 return (
                   <Link
@@ -314,11 +318,25 @@ export default function HomePage() {
                     {/* ส่วนแสดงรูปภาพ (หากไม่มีรูปภาพ ให้แสดงกล่องสีเทา 'รูปภาพ' ตรงกลางตาม Wireframe) */}
                     <div className="w-full h-52 bg-[#e5e7eb] flex items-center justify-center border-b border-border relative overflow-hidden">
                       {primaryImage ? (
-                        <img
-                          src={primaryImage}
-                          alt={pet.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
+                        <>
+                          <img
+                            src={primaryImage}
+                            alt={pet.name}
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              target.style.display = 'none';
+                              const fallback = target.nextElementSibling as HTMLElement;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div
+                            style={{ display: 'none' }}
+                            className="w-full h-full border border-dashed border-gray-300 m-2 rounded-lg items-center justify-center text-gray-500 font-medium"
+                          >
+                            รูปภาพ
+                          </div>
+                        </>
                       ) : (
                         <div className="w-full h-full border border-dashed border-gray-300 m-2 rounded-lg flex items-center justify-center text-gray-500 font-medium">
                           รูปภาพ
