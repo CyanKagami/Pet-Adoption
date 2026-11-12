@@ -39,6 +39,7 @@ function ReviewContent() {
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [reviewError, setReviewError] = useState('');
 
   // ดึงรายการรีวิวที่มีอยู่จริงจากฐานข้อมูล
   const [existingReviews, setExistingReviews] = useState<DBReview[]>([]);
@@ -76,6 +77,7 @@ function ReviewContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setHasAttemptedSubmit(true);
+    setReviewError('');
 
     if (!isValid) return;
 
@@ -95,10 +97,19 @@ function ReviewContent() {
           router.push('/pets');
         }, 1800);
       } else {
-        alert(res.message || 'ไม่สามารถบันทึกรีวิวได้ กรุณาตรวจสอบการเข้าสู่ระบบ');
+        const errorCode = (res as any)?.error?.code;
+        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถบันทึกรีวิวได้';
+        if (errorCode === 'INVALID_TARGET_USER') {
+          msg = 'ไม่สามารถเขียนรีวิวให้ตนเองได้';
+        } else if (errorCode === 'UNAUTHORIZED') {
+          msg = 'กรุณาเข้าสู่ระบบก่อนเขียนรีวิว';
+        } else if (errorCode === 'USER_NOT_FOUND') {
+          msg = 'ไม่พบข้อมูลผู้ใช้ที่ต้องการรีวิวในระบบ';
+        }
+        setReviewError(msg);
       }
     } catch {
-      alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      setReviewError('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSubmitting(false);
     }
@@ -172,11 +183,21 @@ function ReviewContent() {
               />
             </div>
 
-            {/* Error Message */}
+            {/* สาเหตุที่ส่งรีวิวไม่ได้ */}
             {hasAttemptedSubmit && !isValid && (
-              <p className="text-red-500 text-xs font-medium">
-                กรุณาให้คะแนนและเขียนความคิดเห็น
-              </p>
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs space-y-1">
+                <p className="font-semibold">ไม่สามารถส่งรีวิวได้เนื่องจาก:</p>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {rating === 0 && <li>ยังไม่ได้เลือกคะแนนดาว (กรุณาให้คะแนน 1-5 ดาว)</li>}
+                  {!comment.trim() && <li>ยังไม่ได้เขียนความคิดเห็นสำหรับการรีวิว</li>}
+                </ul>
+              </div>
+            )}
+
+            {reviewError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+                ไม่สามารถส่งรีวิวได้: {reviewError}
+              </div>
             )}
 
             {/* Buttons: ยกเลิก / ส่งรีวิว */}

@@ -36,6 +36,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // ข้อมูลอัปเดตจริงจากฐานข้อมูล
   const [realUpdates, setRealUpdates] = useState<PetUpdateItem[]>([]);
@@ -109,6 +110,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const handleSubmitUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setHasAttemptedSubmit(true);
+    setUpdateError(null);
 
     if (!isImagesValid) return;
 
@@ -143,10 +145,21 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
           setActionNotice(null);
         }, 4000);
       } else {
-        alert(res.message || 'ไม่สามารถส่งอัปเดตได้ กรุณาเข้าสู่ระบบ');
+        const errorCode = (res as any)?.error?.code;
+        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถส่งรูปภาพอัปเดตได้';
+        if (errorCode === 'PET_NOT_ADOPTED') {
+          msg = 'สัตว์เลี้ยงต้องมีสถานะได้รับเลี้ยงแล้ว (Adopted) ถึงจะส่งรูปอัปเดตได้';
+        } else if (errorCode === 'FORBIDDEN') {
+          msg = 'เฉพาะผู้ที่ได้รับการคัดเลือกให้รับเลี้ยงสัตว์เลี้ยงตัวนี้เท่านั้นที่สามารถส่งรูปอัปเดตได้';
+        } else if (errorCode === 'INVALID_IMAGES') {
+          msg = 'ต้องอัปโหลดรูปภาพ 3 ถึง 5 รูป (ไฟล์ JPEG หรือ PNG เท่านั้น)';
+        } else if (errorCode === 'UNAUTHORIZED') {
+          msg = 'กรุณาเข้าสู่ระบบก่อนส่งรูปภาพอัปเดต';
+        }
+        setUpdateError(msg);
       }
     } catch {
-      alert('เกิดข้อผิดพลาดในการส่งรูปภาพอัปเดต');
+      setUpdateError('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSubmitting(false);
     }
@@ -391,11 +404,18 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                   })}
                 </div>
 
-                {/* Red Notice */}
+                {/* Red Notice / เหตุผลที่ไม่สามารถส่งอัปเดตได้ */}
                 {hasAttemptedSubmit && !isImagesValid && (
-                  <p className="text-red-500 text-xs font-medium">
-                    ต้องอัปโหลดอย่างน้อย 3 รูป (ปัจจุบันมี {images.length} รูป)
-                  </p>
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium space-y-1">
+                    <p className="font-semibold">ไม่สามารถส่งอัปเดตได้เนื่องจาก:</p>
+                    <p>• ต้องอัปโหลดรูปภาพอย่างน้อย 3 รูป (ปัจจุบันอัปโหลดแล้ว {images.length}/3 รูป)</p>
+                  </div>
+                )}
+
+                {updateError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+                    ไม่สามารถส่งอัปเดตได้: {updateError}
+                  </div>
                 )}
 
                 {/* ปุ่ม ส่งอัปเดต */}

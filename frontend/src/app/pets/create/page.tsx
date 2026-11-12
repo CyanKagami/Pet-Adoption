@@ -15,6 +15,7 @@ import {
   Calendar,
   Paperclip,
   FileText,
+  AlertCircle,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
@@ -162,12 +163,38 @@ function CreatePetContent() {
 
   // ตรวจสอบความถูกต้องของข้อมูล
   const isImagesValid = images.length > 0;
+  const isNameValid = name.trim().length >= 2;
   const isTypeValid = Boolean(type && type !== '' && type !== 'เลือก ▾');
   const isBreedValid = Boolean(breed.trim());
   const isLocationValid = Boolean(location.trim());
   const isHealthValid = Boolean(neutered !== '' || vaccine.trim() || disease.trim());
 
-  const isFormValid = isImagesValid && isTypeValid && isBreedValid && isLocationValid;
+  const isFormValid = isImagesValid && isNameValid && isTypeValid && isBreedValid && isLocationValid;
+
+  // รวบรวมเหตุผลทั้งหมดที่ทำให้ไม่สามารถสร้างประกาศได้
+  const getValidationErrors = () => {
+    const reasons: string[] = [];
+    if (!isImagesValid) {
+      reasons.push('ยังไม่ได้อัปโหลดรูปภาพสัตว์เลี้ยง (ต้องมีอย่างน้อย 1 รูป, สูงสุด 5 รูป)');
+    }
+    if (!isNameValid) {
+      if (name.trim().length === 0) {
+        reasons.push('ยังไม่ได้ระบุชื่อสัตว์เลี้ยง (ต้องมีความยาวอย่างน้อย 2 ตัวอักษร)');
+      } else {
+        reasons.push(`ชื่อสัตว์เลี้ยง "${name.trim()}" สั้นเกินไป (ต้องมีความยาวอย่างน้อย 2 ตัวอักษร)`);
+      }
+    }
+    if (!isTypeValid) {
+      reasons.push('ยังไม่ได้เลือกชนิดสัตว์เลี้ยง (กรุณาเลือก สุนัข, แมว หรืออื่นๆ)');
+    }
+    if (!isBreedValid) {
+      reasons.push('ยังไม่ได้ระบุสายพันธุ์สัตว์เลี้ยง');
+    }
+    if (!isLocationValid) {
+      reasons.push('ยังไม่ได้ระบุที่พักพิงปัจจุบันหรือพื้นที่ที่สัตว์เลี้ยงอยู่');
+    }
+    return reasons;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -195,7 +222,7 @@ function CreatePetContent() {
       }
 
       const res = await api.pets.create({
-        name: name.trim() || 'สัตว์เลี้ยงหาบ้าน',
+        name: name.trim(),
         type,
         breed: breed.trim(),
         gender: gender,
@@ -220,10 +247,25 @@ function CreatePetContent() {
           router.push('/pets');
         }, 1800);
       } else {
-        setGeneralError(res.message || 'ไม่สามารถสร้างประกาศได้');
+        let errorMsg = res.message || (res as any).error?.message || 'ไม่สามารถสร้างประกาศได้';
+        const errorCode = (res as any).error?.code;
+        if (errorCode === 'INVALID_NAME') {
+          errorMsg = 'ชื่อสัตว์เลี้ยงไม่ถูกต้อง (ต้องมีความยาวอย่างน้อย 2 ตัวอักษร)';
+        } else if (errorCode === 'INVALID_TYPE') {
+          errorMsg = 'ชนิดสัตว์เลี้ยงไม่ถูกต้อง (ต้องเป็น สุนัข, แมว หรืออื่นๆ)';
+        } else if (errorCode === 'INVALID_LOCATION') {
+          errorMsg = 'กรุณาระบุที่พักพิงปัจจุบันหรือพื้นที่ของสัตว์เลี้ยง';
+        } else if (errorCode === 'UNAUTHORIZED') {
+          errorMsg = 'คุณยังไม่ได้เข้าสู่ระบบ หรือเซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้ง';
+        } else if (errorCode === 'INVALID_IMAGES' || errorCode === 'LIMIT_FILE_COUNT') {
+          errorMsg = 'รูปภาพไม่ถูกต้อง หรือจำนวนรูปภาพเกินขีดจำกัด (สูงสุด 5 รูป)';
+        } else if (errorCode === 'LIMIT_FILE_SIZE') {
+          errorMsg = 'ขนาดไฟล์รูปภาพเกินขนาดที่กำหนด (ไม่เกิน 5MB ต่อรูป)';
+        }
+        setGeneralError(errorMsg);
       }
     } catch {
-      setGeneralError('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+      setGeneralError('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSubmitting(false);
     }
@@ -271,9 +313,26 @@ function CreatePetContent() {
           สร้างประกาศหาบ้านให้สัตว์เลี้ยง
         </h1>
 
-        {generalError && (
-          <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-            {generalError}
+        {/* กล่องแสดงแจ้งเตือนสาเหตุที่ไม่สามารถสร้างประกาศได้ */}
+        {(generalError || (hasSubmittedAttempt && !isFormValid)) && (
+          <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 space-y-2 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2 font-bold text-sm sm:text-base text-red-700">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+              <span>ไม่สามารถสร้างประกาศได้ เนื่องจาก:</span>
+            </div>
+            {generalError && (
+              <p className="text-sm text-red-700 pl-7 font-medium">{generalError}</p>
+            )}
+            {hasSubmittedAttempt && !isFormValid && (
+              <div className="pl-7 space-y-1">
+                <p className="text-xs text-red-600 font-medium">กรุณาตรวจสอบและกรอกข้อมูลที่จำเป็นดังต่อไปนี้:</p>
+                <ul className="list-disc pl-5 text-xs sm:text-sm text-red-700 space-y-1">
+                  {getValidationErrors().map((reason, idx) => (
+                    <li key={idx} className="font-medium">{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -344,39 +403,62 @@ function CreatePetContent() {
 
               {/* ข้อความแจ้งเตือนสีแดงด้านล่างกล่องรูปตาม Wireframe */}
               {hasSubmittedAttempt && !isImagesValid && (
-                <p className="text-red-500 text-xs sm:text-sm font-normal">
-                  ต้องมีอย่างน้อย 1 รูป
+                <p className="text-red-500 text-xs sm:text-sm font-medium flex items-center gap-1.5 pt-1">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <span>ยังไม่ได้อัปโหลดรูปภาพ (ต้องมีอย่างน้อย 1 รูป, สูงสุด 5 รูป)</span>
                 </p>
               )}
             </div>
 
             {/* คอลัมน์กลาง: ข้อมูลสัตว์เลี้ยง (4 cols) */}
             <div className="lg:col-span-4 space-y-4">
-              {/* ชื่อสัตว์ */}
+              {/* ชื่อสัตว์ * */}
               <div className="space-y-1.5">
-                <label htmlFor="petName" className="block text-sm font-bold text-gray-800">
-                  ชื่อสัตว์
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="petName" className="block text-sm font-bold text-gray-800">
+                    ชื่อสัตว์ *
+                  </label>
+                  {hasSubmittedAttempt && !isNameValid && (
+                    <span className="text-red-500 text-xs font-normal">
+                      {name.trim().length === 0 ? 'กรุณาระบุชื่อสัตว์เลี้ยง' : 'ต้องมีความยาวอย่างน้อย 2 ตัวอักษร'}
+                    </span>
+                  )}
+                </div>
                 <input
                   id="petName"
                   type="text"
+                  placeholder="เช่น มอมแมม, ถุงเงิน"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full h-10 px-3 bg-white rounded-md text-sm text-gray-900 border border-gray-300 hover:border-gray-400 focus:outline-hidden focus:ring-1 focus:ring-primary"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (generalError) setGeneralError('');
+                  }}
+                  className={`w-full h-10 px-3 bg-white rounded-md text-sm text-gray-900 border transition-colors focus:outline-hidden focus:ring-1 focus:ring-primary ${
+                    hasSubmittedAttempt && !isNameValid
+                      ? 'border-red-400 focus:border-red-500 bg-red-50/10'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
                 />
               </div>
 
               {/* ชนิดสัตว์ * (คลิกเพื่อแสดงตัวเลือก แล้วคลิกเลือก - Requirement 3) */}
               <div className="space-y-1.5 relative" ref={typeRef}>
-                <label className="block text-sm font-bold text-gray-800">
-                  ชนิดสัตว์ *
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-bold text-gray-800">
+                    ชนิดสัตว์ *
+                  </label>
+                  {hasSubmittedAttempt && !isTypeValid && (
+                    <span className="text-red-500 text-xs font-normal">
+                      กรุณาเลือกชนิดสัตว์
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => setIsTypeOpen((prev) => !prev)}
                   className={`w-full h-10 px-3 bg-white rounded-md text-sm text-left flex items-center justify-between border transition-all cursor-pointer ${
                     hasSubmittedAttempt && !isTypeValid
-                      ? 'border-red-400 focus:border-red-500'
+                      ? 'border-red-400 focus:border-red-500 bg-red-50/10'
                       : 'border-gray-300 hover:border-gray-400'
                   }`}
                 >
@@ -401,6 +483,7 @@ function CreatePetContent() {
                           onClick={() => {
                             setType(opt);
                             setIsTypeOpen(false);
+                            if (generalError) setGeneralError('');
                           }}
                           className={`w-full text-left px-3.5 py-2 text-sm flex items-center justify-between transition-colors cursor-pointer ${
                             isSelected
@@ -470,7 +553,7 @@ function CreatePetContent() {
 
               {/* สายพันธุ์ * (ตาม Wireframe แสดงกรอบสีแดงพร้อมข้อความ กรุณากรอกสายพันธุ์) */}
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between">
                   <label htmlFor="petBreed" className="block text-sm font-bold text-gray-800">
                     สายพันธุ์ *
                   </label>
@@ -483,11 +566,15 @@ function CreatePetContent() {
                 <input
                   id="petBreed"
                   type="text"
+                  placeholder="เช่น โกลเด้น รีทรีฟเวอร์ หรือ ไทยผสม"
                   value={breed}
-                  onChange={(e) => setBreed(e.target.value)}
+                  onChange={(e) => {
+                    setBreed(e.target.value);
+                    if (generalError) setGeneralError('');
+                  }}
                   className={`w-full h-10 px-3 bg-white rounded-md text-sm text-gray-900 border transition-colors focus:outline-hidden focus:ring-1 focus:ring-primary ${
                     hasSubmittedAttempt && !isBreedValid
-                      ? 'border-red-400'
+                      ? 'border-red-400 focus:border-red-500 bg-red-50/10'
                       : 'border-gray-300 hover:border-gray-400'
                   }`}
                 />
@@ -510,18 +597,28 @@ function CreatePetContent() {
 
               {/* ที่พักพิงปัจจุบัน * */}
               <div className="space-y-1.5">
-                <label htmlFor="petLocation" className="block text-sm font-bold text-gray-800">
-                  ที่พักพิงปัจจุบัน *
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="petLocation" className="block text-sm font-bold text-gray-800">
+                    ที่พักพิงปัจจุบัน *
+                  </label>
+                  {hasSubmittedAttempt && !isLocationValid && (
+                    <span className="text-red-500 text-xs sm:text-sm font-normal">
+                      กรุณากรอกที่พักพิงปัจจุบัน
+                    </span>
+                  )}
+                </div>
                 <input
                   id="petLocation"
                   type="text"
-                  placeholder="ศูนย์/บ้านพัก/พื้นที่"
+                  placeholder="ศูนย์/บ้านพัก/พื้นที่ (เช่น กรุงเทพฯ, เชียงใหม่)"
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    if (generalError) setGeneralError('');
+                  }}
                   className={`w-full h-10 px-3 bg-white rounded-md text-sm text-gray-900 border transition-colors focus:outline-hidden focus:ring-1 focus:ring-primary placeholder:text-gray-400 ${
                     hasSubmittedAttempt && !isLocationValid
-                      ? 'border-red-400'
+                      ? 'border-red-400 focus:border-red-500 bg-red-50/10'
                       : 'border-gray-300 hover:border-gray-400'
                   }`}
                 />
@@ -763,12 +860,26 @@ function CreatePetContent() {
 
           {/* แถวล่างสุด: ข้อความสีแดงทางซ้าย และปุ่มกด 2 ปุ่มทางขวา */}
           <div className="pt-8 mt-6 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* ซ้าย: แสดงข้อความแจ้งเตือนสีแดงตาม Wireframe */}
+            {/* ซ้าย: แสดงข้อความแจ้งเตือนสีแดงพร้อมระบุเหตุผลอย่างชัดเจน */}
             <div className="w-full sm:w-auto text-left">
               {hasSubmittedAttempt && !isFormValid && (
-                <span className="text-red-500 text-sm font-medium">
-                  กรอกข้อมูลที่จำเป็นไม่ครบ: ไม่สามารถสร้างประกาศได้
-                </span>
+                <div className="space-y-1">
+                  <span className="text-red-500 text-sm font-semibold flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    <span>ไม่สามารถสร้างประกาศได้: ข้อมูลที่จำเป็นยังไม่ครบถ้วน</span>
+                  </span>
+                  <p className="text-red-500/80 text-xs">
+                    สาเหตุ: {getValidationErrors().join(' • ')}
+                  </p>
+                </div>
+              )}
+              {generalError && !(!isFormValid && hasSubmittedAttempt) && (
+                <div className="space-y-1">
+                  <span className="text-red-600 text-sm font-semibold flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>ไม่สามารถสร้างประกาศได้: {generalError}</span>
+                  </span>
+                </div>
               )}
             </div>
 

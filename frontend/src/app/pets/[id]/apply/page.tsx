@@ -201,7 +201,16 @@ function ApplyFormContent({ params }: ApplyPageProps) {
           router.push(`/pets/${id}`);
         }, 2200);
       } else {
-        setGeneralError(res.message || 'ไม่สามารถส่งแบบประเมินความพร้อมรับเลี้ยงได้');
+        const errorCode = (res as any)?.error?.code;
+        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถส่งแบบประเมินความพร้อมรับเลี้ยงได้';
+        if (errorCode === 'APPLICATION_ALREADY_SUBMITTED') {
+          msg = 'คุณได้ส่งใบสมัครขอรับเลี้ยงสัตว์เลี้ยงตัวนี้ไปแล้ว ไม่สามารถส่งซ้ำได้';
+        } else if (errorCode === 'FORBIDDEN' || (res as any)?.error?.message?.includes('own pet')) {
+          msg = 'คุณไม่สามารถยื่นขอรับเลี้ยงสัตว์เลี้ยงของตนเองได้';
+        } else if (errorCode === 'UNAUTHORIZED') {
+          msg = 'กรุณาเข้าสู่ระบบก่อนส่งแบบประเมิน';
+        }
+        setGeneralError(msg);
       }
     } catch {
       setGeneralError('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
@@ -576,12 +585,25 @@ function ApplyFormContent({ params }: ApplyPageProps) {
 
           {/* แถวล่างสุด: ข้อความแจ้งเตือนทางซ้าย และปุ่มกด 2 ปุ่มทางขวา */}
           <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* ซ้าย: ข้อความสีแดงหากข้อมูลยังไม่ครบตาม Wireframe */}
+            {/* ซ้าย: ข้อความแจ้งเตือนพร้อมเหตุผลอย่างชัดเจน */}
             <div className="w-full sm:w-auto text-left">
               {hasSubmittedAttempt && !isFormValid && (
-                <span className="text-red-500 text-sm font-medium">
-                  ส่งไม่ได้: ยังกรอกข้อมูลไม่ครบ
-                </span>
+                <div className="space-y-1">
+                  <span className="text-red-500 text-sm font-semibold flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    <span>ไม่สามารถส่งแบบประเมินได้: ข้อมูลยังไม่ครบถ้วน</span>
+                  </span>
+                  <p className="text-red-500/80 text-xs">
+                    สาเหตุ: {[
+                      !isHousingValid && 'ยังไม่ได้เลือกประเภทที่อยู่อาศัย',
+                      !isExperienceValid && 'ยังไม่ได้เลือกประสบการณ์เลี้ยงสัตว์',
+                      !isIncomeValid && 'ยังไม่ได้เลือกช่วงรายได้ต่อเดือน',
+                      !isHouseholdValid && 'ยังไม่ได้ระบุจำนวนสมาชิกในบ้าน',
+                      !isReasonValid && 'ยังไม่ได้ระบุเหตุผลในการรับเลี้ยง',
+                      !isTermsValid && 'ยังไม่ได้กดยอมรับเงื่อนไขการรับเลี้ยง',
+                    ].filter(Boolean).join(' • ')}
+                  </p>
+                </div>
               )}
             </div>
 
