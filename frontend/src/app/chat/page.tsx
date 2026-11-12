@@ -52,6 +52,7 @@ function ChatContent() {
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesThreadId, setMessagesThreadId] = useState<string | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -137,36 +138,67 @@ function ChatContent() {
   const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || null;
   const activeThreadUserId = activeThread?.userId;
   const activeThreadPetId = activeThread?.petId;
+  const activeThreadKey = activeThread?.id;
   const activeThreadIsNew = activeThread?.isNew;
-  const displayedMessages = activeThreadIsNew ? [] : messages;
+  const displayedMessages = activeThreadIsNew || messagesThreadId !== activeThreadKey ? [] : messages;
   const showingMessagesLoading = isLoadingMessages && !activeThreadIsNew;
 
   // 3. โหลดข้อความแชทจริงของห้องที่เลือก (Strict Privacy: เฉพาะคู่สนทนาเท่านั้น)
   useEffect(() => {
-    if (!currentUser || !activeThreadUserId || activeThreadIsNew) return;
-
     let cancelled = false;
+
+    if (!currentUser || !activeThreadUserId || !activeThreadKey || activeThreadIsNew) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    let requestInFlight = false;
+    let initialLoad = true;
+
     const fetchMessages = async () => {
+      if (cancelled || requestInFlight || document.visibilityState === 'hidden') return;
+      requestInFlight = true;
+      if (initialLoad) setIsLoadingMessages(true);
+
       try {
-        setIsLoadingMessages(true);
         const res = await api.messages.getHistory(activeThreadUserId, activeThreadPetId);
-        if (res.success && Array.isArray(res.data)) {
-          if (!cancelled) setMessages(res.data);
-        } else {
-          if (!cancelled) setMessages([]);
+        if (!res.success || !Array.isArray(res.data)) {
+          throw new Error(res.message || 'Failed to load chat history');
         }
-      } catch {
-        if (!cancelled) setMessages([]);
+        if (!cancelled) {
+          setMessages((currentMessages) => (
+            currentMessages.length === res.data.length
+              && currentMessages.every((message, index) => message.id === res.data[index].id)
+              ? currentMessages
+              : res.data
+          ));
+          setMessagesThreadId(activeThreadKey);
+        }
+      } catch (error) {
+        if (!cancelled) console.error('Failed to load chat messages:', error);
       } finally {
-        if (!cancelled) setIsLoadingMessages(false);
+        requestInFlight = false;
+        if (!cancelled && initialLoad) {
+          initialLoad = false;
+          setIsLoadingMessages(false);
+        }
       }
     };
 
     fetchMessages();
+    const pollInterval = window.setInterval(fetchMessages, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') fetchMessages();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       cancelled = true;
+      window.clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentUser, activeThread?.id, activeThreadUserId, activeThreadPetId, activeThreadIsNew]);
+  }, [currentUser, activeThreadKey, activeThreadUserId, activeThreadPetId, activeThreadIsNew]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -187,7 +219,12 @@ function ChatContent() {
       });
 
       if (res.success && res.data) {
-        setMessages((prev) => [...prev, res.data]);
+        setMessages((prev) => (
+          prev.some((message) => message.id === res.data.id)
+            ? prev
+            : [...prev, res.data]
+        ));
+        setMessagesThreadId(activeThread.id);
 
         // อัปเดตรายการห้องแชท
         setThreads((prev) =>
