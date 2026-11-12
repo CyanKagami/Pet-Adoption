@@ -32,6 +32,8 @@ NEXT_PUBLIC_API_URL="http://localhost:5000/api/v1"
 ```bash
 docker compose up -d --build
 ```
+Compose waits for PostgreSQL and the backend readiness checks before starting dependent services. On first startup, wait for migrations and Prisma Client generation to finish.
+The frontend container builds the Next.js application and runs it with `next start`.
 - 🌐 **Frontend:** [http://localhost:3000](http://localhost:3000)
 - 🔌 **Backend API:** [http://localhost:5000/api/v1](http://localhost:5000/api/v1)
 

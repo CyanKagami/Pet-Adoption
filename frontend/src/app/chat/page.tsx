@@ -19,6 +19,7 @@ interface Message {
   petId?: string | null;
   message?: string;
   content?: string;
+  isRead?: boolean;
   createdAt: string;
   sender?: { id: string; fullName: string };
 }
@@ -36,6 +37,7 @@ interface ChatThread {
   lastMessage: string;
   time: string;
   isNew?: boolean;
+  unread?: boolean;
 }
 
 function ChatContent() {
@@ -82,13 +84,20 @@ function ChatContent() {
   useEffect(() => {
     if (!currentUser) return;
 
+    let cancelled = false;
+    let requestInFlight = false;
+    let hasLoadedThreads = false;
+
     const loadRealThreads = async () => {
+      if (cancelled || requestInFlight || document.visibilityState === 'hidden') return;
+      requestInFlight = true;
       try {
         const res = await api.messages.getThreads();
-        let loadedThreads: ChatThread[] = [];
-        if (res.success && Array.isArray(res.data)) {
-          loadedThreads = res.data;
+        if (!res.success || !Array.isArray(res.data)) {
+          throw new Error(res.message || 'Failed to load chat threads');
         }
+        let loadedThreads: ChatThread[] = res.data;
+        let routeThreadId: string | null = null;
 
         // Requirement 4: เมื่อกดแชทจากหน้าอื่น หากไม่เคยคุยกัน ประวัติจะว่างเปล่าและสร้างห้องใหม่
         if (userParam) {
@@ -101,10 +110,17 @@ function ChatContent() {
           );
 
           if (found) {
-            if (petNameParam) found.petName = petNameParam;
-            if (petIdParam) found.petId = petIdParam;
-            if (petStatusParam) found.petStatus = petStatusParam;
-            setActiveThreadId(found.id);
+            routeThreadId = found.id;
+            loadedThreads = loadedThreads.map((thread) => (
+              thread.id === found.id
+                ? {
+                    ...thread,
+                    ...(petNameParam ? { petName: petNameParam } : {}),
+                    ...(petIdParam ? { petId: petIdParam } : {}),
+                    ...(petStatusParam ? { petStatus: petStatusParam } : {}),
+                  }
+                : thread
+            ));
           } else {
             // ไม่เคยคุยกันมาก่อน (Never talked with him before) -> สร้างห้องสนทนาใหม่ที่มีประวัติว่าง (empty)
             const threadId = `${userParam}:${targetPetId || 'general'}`;
@@ -120,34 +136,54 @@ function ChatContent() {
               isNew: true,
             };
             loadedThreads = [newThread, ...loadedThreads];
-            setActiveThreadId(threadId);
+            routeThreadId = threadId;
           }
         } else if (loadedThreads.length > 0) {
-          setActiveThreadId((current) => current || loadedThreads[0].id);
+          routeThreadId = loadedThreads[0].id;
         }
 
-        setThreads(loadedThreads);
+        if (!cancelled) {
+          setThreads(loadedThreads);
+          if (!hasLoadedThreads && routeThreadId) {
+            setActiveThreadId(routeThreadId);
+          } else if (!userParam && loadedThreads.length > 0) {
+            setActiveThreadId((current) => current || loadedThreads[0].id);
+          }
+          hasLoadedThreads = true;
+        }
       } catch (err) {
-        console.error('Failed to load chat threads:', err);
+        if (!cancelled) console.error('Failed to load chat threads:', err);
+      } finally {
+        requestInFlight = false;
       }
     };
 
     loadRealThreads();
+    const pollInterval = window.setInterval(loadRealThreads, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') loadRealThreads();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [currentUser, userParam, userNameParam, petNameParam, petIdParam, petStatusParam]);
 
   const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || null;
   const activeThreadUserId = activeThread?.userId;
   const activeThreadPetId = activeThread?.petId;
   const activeThreadKey = activeThread?.id;
-  const activeThreadIsNew = activeThread?.isNew;
-  const displayedMessages = activeThreadIsNew || messagesThreadId !== activeThreadKey ? [] : messages;
-  const showingMessagesLoading = isLoadingMessages && !activeThreadIsNew;
+  const displayedMessages = messagesThreadId !== activeThreadKey ? [] : messages;
+  const showingMessagesLoading = isLoadingMessages && messagesThreadId !== activeThreadKey;
 
   // 3. โหลดข้อความแชทจริงของห้องที่เลือก (Strict Privacy: เฉพาะคู่สนทนาเท่านั้น)
   useEffect(() => {
     let cancelled = false;
 
-    if (!currentUser || !activeThreadUserId || !activeThreadKey || activeThreadIsNew) {
+    if (!currentUser || !activeThreadUserId || !activeThreadKey) {
       return () => {
         cancelled = true;
       };
@@ -175,6 +211,23 @@ function ChatContent() {
           ));
           setMessagesThreadId(activeThreadKey);
         }
+
+        if (res.data.some(
+          (message: Message) => message.receiverId === currentUser.id && !message.isRead
+        )) {
+          const readRes = await api.messages.markRead(activeThreadUserId, activeThreadPetId);
+          if (!readRes.success) {
+            throw new Error(readRes.message || 'Failed to mark chat messages as read');
+          }
+          if (!cancelled) {
+            setMessages((currentMessages) => currentMessages.map((message) => (
+              message.receiverId === currentUser.id ? { ...message, isRead: true } : message
+            )));
+            setThreads((currentThreads) => currentThreads.map((thread) => (
+              thread.id === activeThreadKey ? { ...thread, unread: false } : thread
+            )));
+          }
+        }
       } catch (error) {
         if (!cancelled) console.error('Failed to load chat messages:', error);
       } finally {
@@ -198,7 +251,7 @@ function ChatContent() {
       window.clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentUser, activeThreadKey, activeThreadUserId, activeThreadPetId, activeThreadIsNew]);
+  }, [currentUser, activeThreadKey, activeThreadUserId, activeThreadPetId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -235,6 +288,7 @@ function ChatContent() {
                 lastMessage: trimmed,
                 time: 'เมื่อสักครู่',
                 isNew: false,
+                unread: false,
               };
             }
             return t;
@@ -292,23 +346,23 @@ function ChatContent() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col font-sans text-foreground">
+    <div className="h-dvh overflow-hidden bg-white flex flex-col font-sans text-foreground">
       {/* 1. Header Navbar */}
       <Navbar activePage="chat" />
 
       {/* 2. Main Chat Container (Wireframe 06-6-Chat 1 - Real DB Data) */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-6 w-full flex-1 flex flex-col">
-        <div className="border border-gray-400 bg-white rounded-lg flex-1 flex flex-col md:flex-row min-h-[580px] overflow-hidden shadow-2xs">
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-4 sm:py-6 w-full flex-1 min-h-0 flex flex-col">
+        <div className="border border-gray-400 bg-white rounded-lg flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden shadow-2xs">
           
           {/* คอลัมน์ซ้าย: การสนทนา (Conversations List) */}
-          <section className="w-full md:w-80 border-b md:border-b-0 md:border-r border-gray-400 flex flex-col bg-white">
+          <section className="w-full h-[35%] min-h-0 shrink-0 md:h-auto md:w-80 border-b md:border-b-0 md:border-r border-gray-400 flex flex-col bg-white">
             <div className="p-4 border-b border-gray-300 flex items-center justify-between">
               <h2 className="text-base font-bold text-gray-900 tracking-tight">
                 การสนทนา ({threads.length})
               </h2>
             </div>
 
-            <div className="p-3 space-y-2.5 flex-1 overflow-y-auto">
+            <div className="p-3 space-y-2.5 flex-1 min-h-0 overflow-y-auto">
               {threads.length === 0 ? (
                 <div className="p-6 text-center text-gray-400 text-xs">
                   ยังไม่มีประวัติการสนทนาในระบบ
@@ -330,11 +384,18 @@ function ChatContent() {
                       <div className="font-bold text-sm text-gray-900 truncate">
                         {thread.userName} • {thread.petName}
                       </div>
-                      <div className="text-xs text-gray-600 truncate mt-1">
-                        {thread.isNew ? (
-                          <span className="text-blue-600 italic">เริ่มการสนทนาใหม่</span>
-                        ) : (
-                          <span>&apos;{thread.lastMessage}&apos; • {thread.time}</span>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-xs text-gray-600 truncate">
+                          {thread.isNew ? (
+                            <span className="text-blue-600 italic">เริ่มการสนทนาใหม่</span>
+                          ) : (
+                            <span>&apos;{thread.lastMessage}&apos; • {thread.time}</span>
+                          )}
+                        </div>
+                        {thread.unread && (
+                          <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                            ใหม่
+                          </span>
                         )}
                       </div>
                     </button>
@@ -345,11 +406,11 @@ function ChatContent() {
           </section>
 
           {/* คอลัมน์ขวา: หน้าต่างแชท (Chat View) */}
-          <section className="flex-1 flex flex-col bg-white">
+          <section className="flex-1 min-h-0 flex flex-col bg-white">
             {activeThread ? (
               <>
                 {/* Top Bar: เกี่ยวกับสัตว์เลี้ยง */}
-                <header className="p-4 border-b border-gray-300 flex items-center justify-between gap-4 bg-white">
+                <header className="p-4 border-b border-gray-300 flex items-center justify-between gap-4 bg-white shrink-0">
                   <div className="flex items-center gap-3">
                     <div className="relative w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden border border-blue-200 shrink-0">
                       {activeThread.petImage ? (
@@ -419,7 +480,7 @@ function ChatContent() {
                 </header>
 
                 {/* กล่องข้อความแชท (Message History) */}
-                <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white min-h-[360px] flex flex-col justify-start">
+                <div className="flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto space-y-4 bg-white flex flex-col justify-start">
                   {showingMessagesLoading ? (
                     <div className="flex-1 flex items-center justify-center text-gray-400 text-xs gap-2 my-auto">
                       <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
@@ -474,7 +535,7 @@ function ChatContent() {
                 </div>
 
                 {/* แถบพิมพ์ข้อความด้านล่าง (Input Bar) */}
-                <footer className="p-4 border-t border-gray-300 bg-white">
+                <footer className="p-4 border-t border-gray-300 bg-white shrink-0">
                   <form onSubmit={handleSendMessage} className="flex items-center gap-3">
                     <input
                       type="text"

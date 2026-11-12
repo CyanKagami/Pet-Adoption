@@ -16,5 +16,5 @@ RUN sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.package-lock.s
 
 EXPOSE 3000
 
-# รัน Next.js ใน mode development (พร้อม Hot-reload)
+# Build and run Next.js in production mode
 ENTRYPOINT ["sh", "/app/entrypoint.sh"]

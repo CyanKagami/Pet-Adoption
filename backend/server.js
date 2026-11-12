@@ -72,7 +72,7 @@ app.use((error, _request, response, _next) => {
 
 async function start() {
   await prisma.$connect();
-  app.listen(port, () => console.log(`Backend listening on port ${port}`));
+  app.listen(port, '0.0.0.0', () => console.log(`Backend listening on port ${port}`));
 }
 
 start().catch((error) => {

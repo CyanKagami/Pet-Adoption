@@ -283,6 +283,14 @@ export const api = {
       const res = await fetch(`/api/messages?${query.toString()}`);
       return res.json();
     },
+    markRead: async (otherUserId: string, petId?: string) => {
+      const res = await fetch('/api/messages/read', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otherUserId, petId }),
+      });
+      return res.json();
+    },
     sendMessage: async (payload: { receiverId: string; petId?: string; message: string }) => {
       const res = await fetch('/api/messages', {
         method: 'POST',

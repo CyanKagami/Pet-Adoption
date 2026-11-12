@@ -16,6 +16,21 @@ function formatRelativeTime(date) {
   return `${diffDays} วันที่แล้ว`;
 }
 
+async function resolveUserId(prisma, userId) {
+  if (!userId.includes('-')) {
+    const foundUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: { startsWith: userId } },
+          { fullName: { contains: userId, mode: 'insensitive' } },
+        ],
+      },
+    });
+    if (foundUser) return foundUser.id;
+  }
+  return userId;
+}
+
 function createMessagesRouter(prisma) {
   const router = express.Router();
   const requireAuth = createRequireAuth(prisma);
@@ -24,18 +39,7 @@ function createMessagesRouter(prisma) {
     const { otherUserId, petId } = request.query;
 
     if (otherUserId) {
-      let resolvedOtherId = otherUserId;
-      if (!otherUserId.includes('-')) {
-        const foundUser = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { email: { startsWith: otherUserId } },
-              { fullName: { contains: otherUserId, mode: 'insensitive' } },
-            ],
-          },
-        });
-        if (foundUser) resolvedOtherId = foundUser.id;
-      }
+      const resolvedOtherId = await resolveUserId(prisma, otherUserId);
 
       const messages = await prisma.message.findMany({
         where: {
@@ -117,8 +121,11 @@ function createMessagesRouter(prisma) {
           lastMessage: msg.content,
           lastMessageAt: msg.createdAt.toISOString(),
           time: formatRelativeTime(msg.createdAt),
-          unread: !msg.isRead && msg.receiverId === request.user.id,
+          unread: false,
         });
+      }
+      if (!msg.isRead && msg.receiverId === request.user.id) {
+        threadMap.get(threadKey).unread = true;
       }
     }
 
@@ -126,6 +133,52 @@ function createMessagesRouter(prisma) {
     response.json({
       success: true,
       data: threads,
+    });
+  });
+
+  const markReadHandler = asyncHandler(async (request, response) => {
+    const { otherUserId, petId } = request.body || {};
+    if (typeof otherUserId !== 'string' || !otherUserId.trim()) {
+      throw apiError('INVALID_OTHER_USER', 'otherUserId is required');
+    }
+
+    const resolvedOtherId = await resolveUserId(prisma, otherUserId.trim());
+    if (resolvedOtherId === request.user.id) {
+      throw apiError('INVALID_OTHER_USER', 'You cannot mark your own messages as received');
+    }
+
+    const otherUser = await prisma.user.findUnique({
+      where: { id: resolvedOtherId },
+      select: { id: true },
+    });
+    if (!otherUser) throw apiError('USER_NOT_FOUND', 'User not found', undefined, 404);
+
+    let targetPetId = null;
+    if (petId !== undefined && petId !== null) {
+      if (typeof petId !== 'string' || !petId.trim()) {
+        throw apiError('INVALID_PET_ID', 'petId must be a non-empty string');
+      }
+      const pet = await prisma.pet.findUnique({
+        where: { id: petId.trim() },
+        select: { id: true },
+      });
+      if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+      targetPetId = pet.id;
+    }
+
+    const result = await prisma.message.updateMany({
+      where: {
+        senderId: resolvedOtherId,
+        receiverId: request.user.id,
+        petId: targetPetId,
+        isRead: false,
+      },
+      data: { isRead: true },
+    });
+
+    response.json({
+      success: true,
+      data: { count: result.count },
     });
   });
 
@@ -143,17 +196,7 @@ function createMessagesRouter(prisma) {
       throw apiError('INVALID_MESSAGE', 'message is required');
     }
 
-    if (!targetReceiverId.includes('-')) {
-      const foundUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email: { startsWith: targetReceiverId } },
-            { fullName: { contains: targetReceiverId, mode: 'insensitive' } },
-          ],
-        },
-      });
-      if (foundUser) targetReceiverId = foundUser.id;
-    }
+    targetReceiverId = await resolveUserId(prisma, targetReceiverId);
 
     if (targetReceiverId === request.user.id) {
       throw apiError('INVALID_RECEIVER', 'You cannot send a message to yourself');
@@ -207,6 +250,7 @@ function createMessagesRouter(prisma) {
   router.get('/messages', requireAuth, getHandler);
   router.post('/', requireAuth, postHandler);
   router.post('/messages', requireAuth, postHandler);
+  router.patch('/read', requireAuth, markReadHandler);
 
   return router;
 }
