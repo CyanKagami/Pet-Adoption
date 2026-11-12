@@ -91,13 +91,19 @@ export const api = {
       return json;
     },
 
-    create: async (payload: Partial<Pet>): Promise<{ success: boolean; data?: Pet; message?: string }> => {
+    create: async (payload: Partial<Pet>): Promise<{ success: boolean; data?: Pet; message?: string; error?: any }> => {
       const res = await fetch('/api/pets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      return res.json();
+      return res.json().catch(() => ({
+        success: false,
+        message:
+          res.status === 413
+            ? 'ขนาดข้อมูลหรือไฟล์รูปภาพใหญ่เกินขีดจำกัดที่เซิร์ฟเวอร์กำหนด (Request Entity Too Large)'
+            : `เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์ (HTTP ${res.status})`,
+      }));
     },
 
     update: async (id: string, payload: any): Promise<{ success: boolean; data?: any; message?: string }> => {

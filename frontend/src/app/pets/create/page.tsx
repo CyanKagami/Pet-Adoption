@@ -259,8 +259,8 @@ function CreatePetContent() {
           errorMsg = 'คุณยังไม่ได้เข้าสู่ระบบ หรือเซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้ง';
         } else if (errorCode === 'INVALID_IMAGES' || errorCode === 'LIMIT_FILE_COUNT') {
           errorMsg = 'รูปภาพไม่ถูกต้อง หรือจำนวนรูปภาพเกินขีดจำกัด (สูงสุด 5 รูป)';
-        } else if (errorCode === 'LIMIT_FILE_SIZE') {
-          errorMsg = 'ขนาดไฟล์รูปภาพเกินขนาดที่กำหนด (ไม่เกิน 5MB ต่อรูป)';
+        } else if (errorCode === 'LIMIT_FILE_SIZE' || errorCode === 'PAYLOAD_TOO_LARGE' || String(errorMsg).toLowerCase().includes('entity too large')) {
+          errorMsg = 'ขนาดไฟล์รูปภาพรวมใหญ่เกินขีดจำกัดที่เซิร์ฟเวอร์กำหนด (กรุณาลดขนาดหรือความละเอียดของไฟล์รูปภาพลง)';
         }
         setGeneralError(errorMsg);
       }
