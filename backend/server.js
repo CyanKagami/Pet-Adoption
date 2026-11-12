@@ -7,11 +7,13 @@ const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
 const { createPetsRouter } = require('./src/routes/pets.routes');
-const { createApplicationsRouter } = require('./src/routes/applications.routes');
+const { createApplicationsRouter, createApplicationManagementRouter } = require('./src/routes/applications.routes');
 const { createWishlistsRouter } = require('./src/routes/wishlists.routes');
 const { createUpdatesRouter } = require('./src/routes/updates.routes');
 const { createMessagesRouter } = require('./src/routes/messages.routes');
 const { createReviewsRouter } = require('./src/routes/reviews.routes');
+const { createAuthRouter } = require('./src/routes/auth.routes');
+const { createNotificationsRouter } = require('./src/routes/notifications.routes');
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
@@ -21,16 +23,32 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(`${api}/auth`, createAuthRouter(prisma));
 app.use(`${api}/pets`, createApplicationsRouter(prisma));
 app.use(`${api}/pets`, createUpdatesRouter(prisma));
 app.use(`${api}/pets`, createPetsRouter(prisma));
 app.use(`${api}/wishlists`, createWishlistsRouter(prisma));
+app.use(`${api}/wishlist`, createWishlistsRouter(prisma));
 app.use(`${api}/chats`, createMessagesRouter(prisma));
+app.use(`${api}/messages`, createMessagesRouter(prisma));
 app.use(`${api}/reviews`, createReviewsRouter(prisma));
+app.use(`${api}/applications`, createApplicationManagementRouter(prisma));
+app.use(`${api}/notifications`, createNotificationsRouter(prisma));
 
 app.use((error, _request, response, _next) => {
+  if (error.type === 'entity.too.large' || error.status === 413) {
+    return response.status(413).json({
+      success: false,
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'ขนาดข้อมูลหรือไฟล์รูปภาพที่ส่งมีขนาดใหญ่เกินกว่าที่เซิร์ฟเวอร์กำหนด (Request Entity Too Large)',
+      },
+    });
+  }
+
   if (error instanceof multer.MulterError) {
     return response.status(400).json({
       success: false,

@@ -103,4 +103,225 @@ function createApplicationsRouter(prisma) {
   return router;
 }
 
-module.exports = { createApplicationsRouter };
+function createApplicationManagementRouter(prisma) {
+  const router = express.Router();
+  const requireAuth = createRequireAuth(prisma);
+
+  router.get('/', requireAuth, asyncHandler(async (request, response) => {
+    const { petId } = request.query;
+    const where = {};
+    if (petId) {
+      where.petId = petId;
+      where.OR = [
+        { pet: { ownerId: request.user.id } },
+        { applicantId: request.user.id },
+      ];
+    } else {
+      where.OR = [
+        { pet: { ownerId: request.user.id } },
+        { applicantId: request.user.id },
+      ];
+    }
+
+    const applications = await prisma.application.findMany({
+      where,
+      include: {
+        pet: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            status: true,
+            ownerId: true,
+          },
+        },
+        applicant: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneNumber: true,
+            profileImage: true,
+            isVerified: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    response.json({
+      success: true,
+      data: applications.map((app) => ({
+        id: app.id,
+        application_id: app.id,
+        petId: app.petId,
+        applicantId: app.applicantId,
+        status: app.status.toLowerCase(),
+        readinessForm: app.readinessForm,
+        createdAt: app.createdAt.toISOString(),
+        pet: app.pet,
+        applicant: app.applicant,
+      })),
+    });
+  }));
+
+  router.post('/', requireAuth, asyncHandler(async (request, response) => {
+    const {
+      petId,
+      pet_id,
+      housingType,
+      housing_type,
+      incomeRange,
+      income_range,
+      petExperience,
+      experience,
+      householdMembers,
+      adoptionReason,
+      agreeTerms,
+      note,
+      applicantName,
+    } = request.body || {};
+
+    const targetPetId = petId || pet_id;
+    if (!targetPetId) {
+      throw apiError('INVALID_APPLICATION', 'petId is required');
+    }
+
+    const finalHousing = housingType || housing_type || '';
+    const finalIncome = incomeRange || income_range || '';
+    const finalExp = petExperience || experience || '';
+
+    if (!finalHousing || !finalIncome || !finalExp) {
+      throw apiError('INVALID_APPLICATION', 'housing_type, income_range, and experience are required');
+    }
+
+    const pet = await prisma.pet.findUnique({
+      where: { id: targetPetId },
+      select: { id: true, ownerId: true },
+    });
+    if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+
+    if (pet.ownerId === request.user.id) {
+      throw apiError('INVALID_APPLICATION', 'You cannot apply to adopt your own pet');
+    }
+
+    const compiledNoteParts = [];
+    if (householdMembers) compiledNoteParts.push(`จำนวนสมาชิก/สัตว์เลี้ยงอื่น: ${householdMembers}`);
+    if (adoptionReason) compiledNoteParts.push(`เหตุผลที่อยากรับเลี้ยง: ${adoptionReason}`);
+    if (applicantName) compiledNoteParts.push(`ชื่อผู้สมัคร: ${applicantName}`);
+    if (agreeTerms !== undefined) compiledNoteParts.push(`ยอมรับเงื่อนไขการรับเลี้ยง: ${agreeTerms ? 'ยอมรับ' : 'ไม่ยอมรับ'}`);
+    if (note) compiledNoteParts.push(note);
+    const compiledNote = compiledNoteParts.join('\n');
+
+    let application;
+    try {
+      application = await prisma.application.create({
+        data: {
+          petId: pet.id,
+          applicantId: request.user.id,
+          readinessForm: {
+            housing_type: String(finalHousing).trim(),
+            income_range: String(finalIncome).trim(),
+            experience: String(finalExp).trim(),
+            ...(compiledNote ? { note: compiledNote } : {}),
+            household_members: householdMembers,
+            adoption_reason: adoptionReason,
+          },
+        },
+        include: {
+          pet: { select: { id: true, name: true, type: true } },
+          applicant: { select: { id: true, fullName: true, email: true } },
+        },
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw apiError('APPLICATION_ALREADY_SUBMITTED', 'You have already applied for this pet');
+      }
+      throw error;
+    }
+
+    // Send initial inquiry message from applicant to owner to start chat thread
+    await prisma.message.create({
+      data: {
+        senderId: request.user.id,
+        receiverId: pet.ownerId,
+        content: `สวัสดีครับ/ค่ะ สนใจขอรับเลี้ยงน้อง "${pet.name}" และได้ส่งแบบประเมินความพร้อมรับเลี้ยงเรียบร้อยแล้วครับ/ค่ะ`,
+      },
+    }).catch(() => null);
+
+    response.status(201).json({
+      success: true,
+      message: 'ส่งแบบประเมินความพร้อมรับเลี้ยงเรียบร้อยแล้ว',
+      data: {
+        id: application.id,
+        application_id: application.id,
+        submitted_at: application.createdAt.toISOString(),
+        ...application,
+      },
+    });
+  }));
+
+  router.patch('/', requireAuth, asyncHandler(async (request, response) => {
+    const { id, status } = request.body || {};
+    if (!id || !status) {
+      throw apiError('INVALID_APPLICATION', 'id and status are required');
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id },
+      include: { pet: true, applicant: true },
+    });
+    if (!application) {
+      throw apiError('APPLICATION_NOT_FOUND', 'Application not found', undefined, 404);
+    }
+    if (application.pet.ownerId !== request.user.id && application.applicantId !== request.user.id) {
+      throw apiError('FORBIDDEN', 'No permission to update this application', undefined, 403);
+    }
+
+    let mappedStatus = 'PENDING';
+    const s = String(status).toUpperCase();
+    if (s === 'ACCEPTED' || s === 'APPROVED') mappedStatus = 'APPROVED';
+    else if (s === 'CANCELLED' || s === 'REJECTED') mappedStatus = 'CANCELLED';
+
+    const updated = await prisma.application.update({
+      where: { id },
+      data: { status: mappedStatus },
+      include: {
+        pet: true,
+        applicant: true,
+      },
+    });
+
+    if (mappedStatus === 'APPROVED') {
+      // 1. Update pet status to PENDING
+      await prisma.pet.update({
+        where: { id: application.petId },
+        data: { status: 'PENDING' },
+      }).catch(() => null);
+
+      // 2. Notify recipient via automated message to start immediate conversation
+      await prisma.message.create({
+        data: {
+          senderId: request.user.id,
+          receiverId: application.applicantId,
+          content: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง "${application.pet.name}" เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
+        },
+      }).catch(() => null);
+    } else if (mappedStatus === 'CANCELLED') {
+      await prisma.message.create({
+        data: {
+          senderId: request.user.id,
+          receiverId: application.applicantId,
+          content: `ขออภัยด้วยครับ/ค่ะ คำขอรับเลี้ยงน้อง "${application.pet.name}" ไม่ผ่านการคัดเลือกในครั้งนี้ ขอขอบคุณที่ให้ความสนใจและรักสัตว์เลี้ยงครับ/ค่ะ`,
+        },
+      }).catch(() => null);
+    }
+
+    response.json({ success: true, data: updated });
+  }));
+
+  return router;
+}
+
+module.exports = { createApplicationsRouter, createApplicationManagementRouter };

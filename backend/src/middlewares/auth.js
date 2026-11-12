@@ -5,7 +5,16 @@ function createRequireAuth(prisma) {
   return async function requireAuth(request, _response, next) {
     try {
       const authorization = request.headers.authorization;
-      const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+      let token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+      if (!token && request.headers.cookie) {
+        const cookies = Object.fromEntries(
+          request.headers.cookie.split(';').map((c) => {
+            const [k, ...v] = c.trim().split('=');
+            return [k, v.join('=')];
+          })
+        );
+        token = cookies.auth_token || null;
+      }
       if (!token) throw apiError('UNAUTHORIZED', 'Authentication required', undefined, 401);
 
       const payload = jwt.verify(token, process.env.JWT_SECRET);
