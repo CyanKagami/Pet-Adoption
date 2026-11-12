@@ -10,6 +10,29 @@ function createUpdatesRouter(prisma) {
   const requireAuth = createRequireAuth(prisma);
   const uploadDirectory = path.join(__dirname, '..', '..', 'uploads', 'updates');
   fs.mkdirSync(uploadDirectory, { recursive: true });
+  const periodAliases = new Map([
+    ['1m', '1m'],
+    ['1_month', '1m'],
+    ['1 เดือน', '1m'],
+    ['3m', '3m'],
+    ['3_months', '3m'],
+    ['3 เดือน', '3m'],
+    ['5m', '5m'],
+    ['5_months', '5m'],
+    ['5 เดือน', '5m'],
+    ['6m', '5m'],
+    ['6_months', '5m'],
+    ['6 เดือน', '5m'],
+    ['1y', '1y'],
+    ['1_year', '1y'],
+    ['1 ปี', '1y'],
+  ]);
+
+  function normalizePeriod(value) {
+    return typeof value === 'string'
+      ? periodAliases.get(value.trim().toLowerCase())
+      : undefined;
+  }
 
   const upload = multer({
     storage: multer.diskStorage({
@@ -45,14 +68,16 @@ function createUpdatesRouter(prisma) {
       success: true,
       data: updates.map((update) => ({
         id: update.id,
+        petId: update.petId,
         pet_id: update.petId,
-        period: update.updatePeriod,
+        period: normalizePeriod(update.updatePeriod) || update.updatePeriod,
         description: update.description,
         images: (update.images || []).map((image) => (
           typeof image === 'string' && (image.startsWith('http') || image.startsWith('data:'))
             ? image
             : `${request.protocol}://${request.get('host')}${image}`
         )),
+        createdAt: update.createdAt.toISOString(),
         created_at: update.createdAt.toISOString(),
       })),
     });
@@ -63,15 +88,9 @@ function createUpdatesRouter(prisma) {
     requireAuth,
     upload.array('images', 5),
     asyncHandler(async (request, response) => {
-      let { period, description } = request.body || {};
-      if (period === '1 เดือน' || period === '1_month') period = '1m';
-      else if (period === '3 เดือน' || period === '3_months') period = '3m';
-      else if (period === '5 เดือน' || period === '6 เดือน' || period === '6_months') period = '6m';
-      else if (period === '1 ปี' || period === '1_year') period = '1y';
-
-      if (!['1m', '3m', '6m', '1y'].includes(period)) {
-        throw apiError('INVALID_PERIOD', 'period must be 1m, 3m, 6m, or 1y');
-      }
+      const { period: rawPeriod, description } = request.body || {};
+      const period = normalizePeriod(rawPeriod);
+      if (!period) throw apiError('INVALID_PERIOD', 'period must be 1m, 3m, 5m, or 1y');
       if (typeof description !== 'string' || !description.trim()) {
         throw apiError('INVALID_DESCRIPTION', 'description is required');
       }

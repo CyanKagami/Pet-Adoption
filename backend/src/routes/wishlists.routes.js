@@ -62,7 +62,7 @@ function createWishlistsRouter(prisma) {
           type: pet.type,
           ...(pet.breed && { breed: pet.breed }),
           location: pet.location,
-          status: pet.status === 'ADOPTED' ? 'adopted' : 'available',
+          status: pet.status.toLowerCase(),
           image: imageUrls[0] || null,
           images: imageUrls,
         };

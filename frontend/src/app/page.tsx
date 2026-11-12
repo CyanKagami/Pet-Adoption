@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Search,
@@ -9,22 +10,19 @@ import {
   Heart,
   Plus,
   Loader2,
-  Info,
-  Calendar,
-  MapPin,
-  Check,
-  ShieldCheck,
-  ExternalLink,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
-import { Pet } from '@/types/pet';
+import { PET_TYPES, type Pet } from '@/types/pet';
+import type { PetOwner } from '@/types/pet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
+type AuthenticatedUser = Pick<PetOwner, 'id'>;
+
 export default function HomePage() {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [pets, setPets] = useState<Pet[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -50,7 +48,7 @@ export default function HomePage() {
           setCurrentUser(authRes.user);
           const wishRes = await api.wishlist.getAll().catch(() => null);
           if (wishRes?.success && Array.isArray(wishRes.data)) {
-            const ids = new Set<string>(wishRes.data.map((p: any) => p.id));
+            const ids = new Set<string>(wishRes.data.map((pet) => pet.id));
             setWishlist(ids);
           }
         } else {
@@ -68,12 +66,6 @@ export default function HomePage() {
   const fetchPets = useCallback(
     async (targetPage = 1, append = false) => {
       try {
-        if (append) {
-          setLoadingMore(true);
-        } else {
-          setLoading(true);
-        }
-
         const res = await api.pets.getAll({
           type: type === 'all' ? undefined : type,
           breed: breed.trim() || undefined,
@@ -84,14 +76,14 @@ export default function HomePage() {
         });
 
         if (res.success) {
-          const list = Array.isArray(res.data) ? res.data : ((res.data as any)?.pets || []);
+          const list = res.data;
           if (append) {
             setPets((prev) => [...prev, ...list]);
           } else {
             setPets(list);
           }
-          setTotal(res.total ?? (res.data as any)?.total ?? list.length);
-          setTotalPages(res.totalPages ?? (res.data as any)?.totalPages ?? 1);
+          setTotal(res.total ?? list.length);
+          setTotalPages(res.totalPages ?? 1);
           setPage(targetPage);
         }
       } catch (err) {
@@ -105,17 +97,50 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    fetchPets(1, false);
-  }, [fetchPets]);
+    let cancelled = false;
+    const loadPets = async () => {
+      try {
+        const res = await api.pets.getAll({
+          type: type === 'all' ? undefined : type,
+          breed: breed.trim() || undefined,
+          location: location.trim() || undefined,
+          status: status === 'all' ? undefined : status,
+          page: 1,
+          limit: 9,
+        });
+
+        if (!cancelled && res.success) {
+          setPets(res.data);
+          setTotal(res.total ?? res.data.length);
+          setTotalPages(res.totalPages ?? 1);
+          setPage(1);
+        }
+      } catch (err) {
+        if (!cancelled) console.error('Failed to load pets:', err);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    };
+
+    void loadPets();
+    return () => {
+      cancelled = true;
+    };
+  }, [type, breed, location, status]);
 
   // ค้นหา
   const handleSearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    setLoading(true);
     fetchPets(1, false);
   };
 
   // ล้างตัวกรอง
   const handleResetFilters = () => {
+    setLoading(true);
     setType('all');
     setBreed('');
     setLocation('');
@@ -125,6 +150,7 @@ export default function HomePage() {
   // โหลดเพิ่มเติม
   const handleLoadMore = () => {
     if (page < totalPages) {
+      setLoadingMore(true);
       fetchPets(page + 1, true);
     }
   };
@@ -216,13 +242,16 @@ export default function HomePage() {
                 id="filterType"
                 aria-label="ชนิดสัตว์"
                 value={type}
-                onChange={(e) => setType(e.target.value)}
+                onChange={(e) => {
+                  setLoading(true);
+                  setType(e.target.value);
+                }}
                 className="w-full h-10 px-3 bg-white border border-input rounded-lg text-sm text-foreground focus:outline-hidden focus:ring-2 focus:ring-ring"
               >
                 <option value="all">ชนิดสัตว์ (ทั้งหมด)</option>
-                <option value="สุนัข">สุนัข (Dog)</option>
-                <option value="แมว">แมว (Cat)</option>
-                <option value="อื่นๆ">อื่นๆ</option>
+                {PET_TYPES.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
               </select>
             </div>
 
@@ -232,7 +261,10 @@ export default function HomePage() {
                 id="filterBreed"
                 placeholder="สายพันธุ์"
                 value={breed}
-                onChange={(e) => setBreed(e.target.value)}
+                onChange={(e) => {
+                  setLoading(true);
+                  setBreed(e.target.value);
+                }}
                 className="h-10 text-sm bg-white"
               />
             </div>
@@ -243,7 +275,10 @@ export default function HomePage() {
                 id="filterLocation"
                 placeholder="ที่พักพิง/พื้นที่"
                 value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                onChange={(e) => {
+                  setLoading(true);
+                  setLocation(e.target.value);
+                }}
                 className="h-10 text-sm bg-white"
               />
             </div>
@@ -254,7 +289,10 @@ export default function HomePage() {
                 id="filterStatus"
                 aria-label="สถานะสัตว์เลี้ยง"
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => {
+                  setLoading(true);
+                  setStatus(e.target.value);
+                }}
                 className="w-full h-10 px-3 bg-white border border-input rounded-lg text-sm text-foreground focus:outline-hidden focus:ring-2 focus:ring-ring"
               >
                 <option value="available">สถานะ: available</option>
@@ -297,13 +335,7 @@ export default function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {pets.map((pet) => {
                 const isWishlisted = wishlist.has(pet.id);
-                let rawImg =
-                  pet.image ||
-                  (pet.images && pet.images.length > 0
-                    ? typeof pet.images[0] === 'string'
-                      ? pet.images[0]
-                      : pet.images[0].imageUrl
-                    : null);
+                let rawImg = pet.image || pet.images?.[0]?.imageUrl || null;
                 if (typeof rawImg === 'string' && (rawImg.startsWith('http://localhost:5000data:') || rawImg.startsWith('https://localhost:5000data:'))) {
                   rawImg = rawImg.replace(/^https?:\/\/localhost:5000/, '');
                 }
@@ -319,9 +351,12 @@ export default function HomePage() {
                     <div className="w-full h-52 bg-[#e5e7eb] flex items-center justify-center border-b border-border relative overflow-hidden">
                       {primaryImage ? (
                         <>
-                          <img
+                          <Image
                             src={primaryImage}
                             alt={pet.name}
+                            fill
+                            sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                            unoptimized
                             onError={(e) => {
                               const target = e.currentTarget;
                               target.style.display = 'none';

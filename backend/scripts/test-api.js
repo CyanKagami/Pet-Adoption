@@ -155,6 +155,28 @@ describe('Pet adoption API', () => {
       ],
     );
     await pool.query(
+      `UPDATE pets
+          SET age_months = 24,
+              gender = 'Female',
+              description = 'API test description',
+              health_info = $2::jsonb,
+              adoption_conditions = 'API test conditions'
+        WHERE id = $1`,
+      [fixture.petId, JSON.stringify({ disease: 'None', vaccinated: true, neutered: false })],
+    );
+    await pool.query(
+      `INSERT INTO applications (id, pet_id, applicant_id, readiness_form, status, updated_at)
+       VALUES ($1, $2, $3, $4::jsonb, 'PENDING', NOW())`,
+      [randomUUID(), fixture.petId, applicantId, JSON.stringify({
+        housing_type: 'House',
+        income_range: '30,000 - 50,000 THB',
+        experience: 'API test experience',
+        note: 'API test application note',
+        household_members: 2,
+        adoption_reason: 'API test reason',
+      })],
+    );
+    await pool.query(
       `UPDATE pets SET status = 'ADOPTED' WHERE id = $1`,
       [fixture.adoptedPetId],
     );
@@ -286,7 +308,7 @@ describe('Pet adoption API', () => {
         code: 'INVALID_TYPE',
         method: 'POST',
         token: fixture.ownerToken,
-        body: JSON.stringify({ name: 'Valid name', type: 'Rabbit', location: fixture.location }),
+        body: JSON.stringify({ name: 'Valid name', type: 'Horse', location: fixture.location }),
       });
     });
 
@@ -390,16 +412,73 @@ describe('Pet adoption API', () => {
       assert.equal(rows[0].location, fixture.location);
     });
 
+    it('POST /pets accepts every frontend pet type and legacy Thai labels', async () => {
+      const petTypes = [
+        ['Dog', 'Dog'],
+        ['Cat', 'Cat'],
+        ['Rabbit', 'Rabbit'],
+        ['Bird', 'Bird'],
+        ['Other', 'Other'],
+        ['สุนัข', 'Dog'],
+        ['แมว', 'Cat'],
+        ['กระต่าย', 'Rabbit'],
+        ['นก', 'Bird'],
+        ['อื่นๆ', 'Other'],
+      ];
+
+      for (const [type, expectedType] of petTypes) {
+        const { response, body } = await request('/pets', {
+          method: 'POST',
+          token: fixture.ownerToken,
+          body: JSON.stringify({
+            name: `Type test ${randomUUID()}`,
+            type,
+            location: fixture.location,
+          }),
+        });
+
+        assert.equal(response.status, 201);
+        const { rows } = await pool.query('SELECT type FROM pets WHERE id = $1', [body.data.pet_id]);
+        assert.equal(rows[0].type, expectedType);
+      }
+    });
+
     it('GET /pets lists matching pets with pagination', async () => {
-      const query = new URLSearchParams({ type: 'Dog', location: fixture.location, page: '1', limit: '5' });
+      const query = new URLSearchParams({ type: 'Dog', location: fixture.location, page: '1', limit: '10' });
       const { response, body } = await request(`/pets?${query}`);
 
       assert.equal(response.status, 200);
       assert.equal(body.success, true);
-      assert.ok(body.data.pets.some((pet) => pet.id === fixture.petId));
+      assert.ok(
+        body.data.pets.some((pet) => pet.id === fixture.petId),
+        `Expected fixture pet in ${JSON.stringify(body.data.pets)}`,
+      );
       assert.ok(body.data.total >= 1);
       assert.equal(body.data.page, 1);
-      assert.equal(body.data.limit, 5);
+      assert.equal(body.data.limit, 10);
+    });
+
+    it('PATCH /pets/:pet_id accepts a localized frontend type and stores its canonical value', async () => {
+      const { response, body } = await request(`/pets/${fixture.applicationPetId}`, {
+        method: 'PATCH',
+        token: fixture.ownerToken,
+        body: JSON.stringify({ type: 'นก' }),
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(body.data.type, 'Bird');
+      const { rows } = await pool.query('SELECT type FROM pets WHERE id = $1', [fixture.applicationPetId]);
+      assert.equal(rows[0].type, 'Bird');
+    });
+
+    it('GET /pets?adoptedByMe=true returns only adopted pets with the user’s approved application', async () => {
+      const { response, body } = await request('/pets?limit=50&adoptedByMe=true', {
+        token: fixture.applicantToken,
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(body.success, true);
+      assert.deepEqual(body.data.pets.map((pet) => pet.id), [fixture.adoptedPetId]);
     });
 
     it('GET /pets/:pet_id returns the pet and owner', async () => {
@@ -409,7 +488,22 @@ describe('Pet adoption API', () => {
       assert.equal(body.success, true);
       assert.equal(body.data.id, fixture.petId);
       assert.equal(body.data.name, fixture.petName);
+      assert.equal(body.data.type, 'Dog');
+      assert.equal(body.data.ageMonths, 24);
+      assert.equal(body.data.gender, 'Female');
+      assert.equal(body.data.description, 'API test description');
+      assert.deepEqual(body.data.healthHistory, { disease: 'None', vaccinated: true, neutered: false });
+      assert.equal(body.data.adoptionConditions, 'API test conditions');
+      assert.ok(body.data.createdAt);
+      assert.ok(body.data.updatedAt);
       assert.equal(body.data.owner.id, ownerId);
+      assert.ok(body.data.owner.createdAt);
+      assert.equal(body.data.applications[0].housingType, 'House');
+      assert.equal(body.data.applications[0].incomeRange, '30,000 - 50,000 THB');
+      assert.equal(body.data.applications[0].petExperience, 'API test experience');
+      assert.equal(body.data.applications[0].additionalNote, 'API test application note');
+      assert.equal(body.data.applications[0].householdMembers, 2);
+      assert.equal(body.data.applications[0].adoptionReason, 'API test reason');
     });
 
     it('GET /pets/:pet_id returns 404 for an unknown pet', async () => {
@@ -669,6 +763,27 @@ describe('Pet adoption API', () => {
       assert.ok(body.data.some((pet) => pet.id === fixture.petId));
     });
 
+    it('GET /wishlists preserves a pending pet status', async () => {
+      const { rows } = await pool.query('SELECT status FROM pets WHERE id = $1', [fixture.adoptedPetId]);
+      const originalStatus = rows[0].status;
+      try {
+        await pool.query('UPDATE pets SET status = $2 WHERE id = $1', [fixture.adoptedPetId, 'PENDING']);
+        const added = await request('/wishlists', {
+          method: 'POST',
+          token: fixture.applicantToken,
+          body: JSON.stringify({ petId: fixture.adoptedPetId }),
+        });
+        assert.equal(added.response.status, 201);
+
+        const { response, body } = await request('/wishlists', { token: fixture.applicantToken });
+        assert.equal(response.status, 200);
+        assert.equal(body.data.find((pet) => pet.id === fixture.adoptedPetId).status, 'pending');
+      } finally {
+        await pool.query('DELETE FROM wishlists WHERE user_id = $1 AND pet_id = $2', [applicantId, fixture.adoptedPetId]);
+        await pool.query('UPDATE pets SET status = $2 WHERE id = $1', [fixture.adoptedPetId, originalStatus]);
+      }
+    });
+
     it('GET /wishlists does not expose another user wishlist', async () => {
       const { response, body } = await request('/wishlists', { token: fixture.ownerToken });
 
@@ -846,7 +961,7 @@ describe('Pet adoption API', () => {
     });
 
     it('POST /pets/:pet_id/updates accepts all documented periods for the approved adopter', async () => {
-      for (const period of ['1m', '3m', '6m', '1y']) {
+      for (const period of ['1m', '3m', '5m', '1y']) {
         const form = await createUpdateForm({ period });
         const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
           method: 'POST',
@@ -858,7 +973,18 @@ describe('Pet adoption API', () => {
         assert.equal(body.success, true);
         assert.ok(body.data.update_id);
         assert.ok(body.data.created_at);
+        assert.ok(body.data.createdAt);
+        assert.equal(body.data.period, period);
       }
+
+      const legacyForm = await createUpdateForm({ period: '6m' });
+      const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
+        method: 'POST',
+        token: fixture.applicantToken,
+        body: legacyForm,
+      });
+      assert.equal(response.status, 201);
+      assert.equal(body.data.period, '5m');
     });
 
     it('GET /pets/:pet_id/updates includes created updates in newest-first order', async () => {
@@ -868,11 +994,12 @@ describe('Pet adoption API', () => {
       assert.equal(body.success, true);
       assert.deepEqual(
         body.data.map((update) => update.period).sort(),
-        ['1m', '1m', '1y', '3m', '6m'].sort(),
+        ['1m', '1m', '1y', '3m', '5m', '5m'].sort(),
       );
+      assert.ok(body.data.every((update) => update.createdAt));
       assert.ok(body.data.every((update, index) => (
         index === 0
-        || new Date(body.data[index - 1].created_at) >= new Date(update.created_at)
+        || new Date(body.data[index - 1].createdAt) >= new Date(update.createdAt)
       )));
       assert.ok(body.data.every((update) => update.pet_id === fixture.adoptedPetId));
       assert.ok(body.data.every((update) => update.images.length === 3));
@@ -945,6 +1072,38 @@ describe('Pet adoption API', () => {
       assert.ok(body.data.sent_at);
       const { rows } = await pool.query('SELECT content FROM messages WHERE id = $1', [body.data.message_id]);
       assert.equal(rows[0].content, 'Is this pet still available?');
+    });
+
+    it('POST and GET /chats/messages keep histories and threads separate by pet', async () => {
+      for (const petId of [fixture.petId, fixture.applicationPetId]) {
+        const { response, body } = await request('/chats/messages', {
+          method: 'POST',
+          token: fixture.applicantToken,
+          body: JSON.stringify({
+            receiverId: ownerId,
+            petId,
+            message: `Message for ${petId}`,
+          }),
+        });
+        assert.equal(response.status, 201);
+        assert.equal(body.data.petId, petId);
+
+        const query = new URLSearchParams({ otherUserId: ownerId, petId });
+        const history = await request(`/chats/messages?${query}`, { token: fixture.applicantToken });
+        assert.equal(history.response.status, 200);
+        assert.ok(history.body.data.length > 0);
+        assert.ok(history.body.data.every((message) => message.petId === petId));
+      }
+
+      const { response, body } = await request('/chats/messages', { token: fixture.applicantToken });
+      assert.equal(response.status, 200);
+      const ownerThreads = body.data.filter((thread) => thread.userId === ownerId);
+      assert.ok(ownerThreads.some((thread) => thread.petId === fixture.petId));
+      assert.ok(ownerThreads.some((thread) => thread.petId === fixture.applicationPetId));
+      assert.notEqual(
+        ownerThreads.find((thread) => thread.petId === fixture.petId).id,
+        ownerThreads.find((thread) => thread.petId === fixture.applicationPetId).id,
+      );
     });
   });
 

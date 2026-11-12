@@ -3,7 +3,8 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import {
   MessageSquare,
   CheckCircle2,
@@ -52,11 +53,10 @@ interface NotificationItem {
 }
 
 function NotificationsContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const applicantParam = searchParams.get('applicant');
 
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,20 +68,24 @@ function NotificationsContent() {
     const loadRealNotifications = async () => {
       try {
         setLoading(true);
-        const authRes = await api.auth.me().catch(() => null);
-        if (authRes?.success && authRes.user) {
-          setCurrentUser(authRes.user);
+        const authRes = await api.auth.me().catch(() => null) as {
+          success?: unknown;
+          user?: unknown;
+        } | null;
+        const isAuthenticated =
+          authRes?.success === true &&
+          typeof authRes.user === 'object' &&
+          authRes.user !== null;
+        if (isAuthenticated) {
+          setCurrentUser(true);
           const res = await api.notifications.getAll();
           if (res.success && Array.isArray(res.data)) {
             setNotifications(res.data);
-            if (res.data.length > 0) {
-              setSelectedId(res.data[0].id);
-            }
           } else {
             setNotifications([]);
           }
         } else {
-          setCurrentUser(null);
+          setCurrentUser(false);
           setNotifications([]);
         }
       } catch (err) {
@@ -95,16 +99,11 @@ function NotificationsContent() {
     loadRealNotifications();
   }, []);
 
-  useEffect(() => {
-    if (applicantParam && notifications.length > 0) {
-      const found = notifications.find((n) => n.applicantId === applicantParam);
-      if (found) {
-        setSelectedId(found.id);
-      }
-    }
-  }, [applicantParam, notifications]);
-
-  const selectedNotif = notifications.find((n) => n.id === selectedId) || notifications[0] || null;
+  const selectedNotif =
+    notifications.find((n) => n.id === selectedId) ||
+    (applicantParam ? notifications.find((n) => n.applicantId === applicantParam) : undefined) ||
+    notifications[0] ||
+    null;
 
   const showToast = (type: 'success' | 'error' | 'info', message: string) => {
     setActionNotice({ type, message });
@@ -422,11 +421,14 @@ function NotificationsContent() {
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="w-16 h-16 rounded-lg bg-gray-200 overflow-hidden border border-gray-300 shrink-0 flex items-center justify-center">
+                        <div className="relative w-16 h-16 rounded-lg bg-gray-200 overflow-hidden border border-gray-300 shrink-0 flex items-center justify-center">
                           {selectedNotif.petImage ? (
-                            <img
+                            <Image
                               src={selectedNotif.petImage}
                               alt={selectedNotif.petName}
+                              fill
+                              sizes="64px"
+                              unoptimized
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -483,11 +485,14 @@ function NotificationsContent() {
 
                   {/* กล่องโปรไฟล์ผู้ใช้ */}
                   <div className="flex items-start gap-4">
-                    <div className="w-24 h-24 sm:w-28 sm:h-28 border border-gray-300 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 text-sm font-medium shrink-0 overflow-hidden">
+                    <div className="relative w-24 h-24 sm:w-28 sm:h-28 border border-gray-300 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 text-sm font-medium shrink-0 overflow-hidden">
                       {selectedNotif.applicantProfileImage ? (
-                        <img
+                        <Image
                           src={selectedNotif.applicantProfileImage}
                           alt=""
+                          fill
+                          sizes="(max-width: 640px) 96px, 112px"
+                          unoptimized
                           className="w-full h-full object-cover"
                         />
                       ) : (

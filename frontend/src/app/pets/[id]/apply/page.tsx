@@ -7,7 +7,25 @@ import { useRouter } from 'next/navigation';
 import { Loader2, ArrowLeft, CheckCircle2, AlertCircle, ChevronDown, Check } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import type { Pet, PetOwner } from '@/types/pet';
 import { Button } from '@/components/ui/button';
+
+type AuthenticatedUser = Pick<PetOwner, 'id' | 'fullName'>;
+
+interface ApiErrorDetails {
+  code?: string;
+  message?: string;
+}
+
+function getApiErrorDetails(value: unknown): ApiErrorDetails {
+  if (!value || typeof value !== 'object' || !('error' in value)) return {};
+  const error = value.error;
+  if (!error || typeof error !== 'object') return {};
+  return {
+    code: 'code' in error && typeof error.code === 'string' ? error.code : undefined,
+    message: 'message' in error && typeof error.message === 'string' ? error.message : undefined,
+  };
+}
 
 interface ApplyPageProps {
   params: Promise<{ id: string }>;
@@ -37,8 +55,8 @@ function ApplyFormContent({ params }: ApplyPageProps) {
   const router = useRouter();
 
   // Authentication & Pet State
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [pet, setPet] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [pet, setPet] = useState<Pet | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isLoadingPet, setIsLoadingPet] = useState(true);
 
@@ -201,11 +219,12 @@ function ApplyFormContent({ params }: ApplyPageProps) {
           router.push(`/pets/${id}`);
         }, 2200);
       } else {
-        const errorCode = (res as any)?.error?.code;
-        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถส่งแบบประเมินความพร้อมรับเลี้ยงได้';
+        const errorDetails = getApiErrorDetails(res);
+        const errorCode = errorDetails.code;
+        let msg = res.message || errorDetails.message || 'ไม่สามารถส่งแบบประเมินความพร้อมรับเลี้ยงได้';
         if (errorCode === 'APPLICATION_ALREADY_SUBMITTED') {
           msg = 'คุณได้ส่งใบสมัครขอรับเลี้ยงสัตว์เลี้ยงตัวนี้ไปแล้ว ไม่สามารถส่งซ้ำได้';
-        } else if (errorCode === 'FORBIDDEN' || (res as any)?.error?.message?.includes('own pet')) {
+        } else if (errorCode === 'FORBIDDEN' || errorDetails.message?.includes('own pet')) {
           msg = 'คุณไม่สามารถยื่นขอรับเลี้ยงสัตว์เลี้ยงของตนเองได้';
         } else if (errorCode === 'UNAUTHORIZED') {
           msg = 'กรุณาเข้าสู่ระบบก่อนส่งแบบประเมิน';

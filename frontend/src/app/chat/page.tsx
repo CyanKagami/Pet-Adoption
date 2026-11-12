@@ -3,15 +3,20 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { Send, User, ExternalLink, ShieldCheck, ChevronRight, MessageSquare, Loader2, Lock } from 'lucide-react';
+import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
+import { Send, MessageSquare, Loader2, Lock } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import type { PetOwner } from '@/types/pet';
+
+type AuthenticatedUser = Pick<PetOwner, 'id' | 'fullName'>;
 
 interface Message {
   id: string;
   senderId: string;
   receiverId: string;
+  petId?: string | null;
   message?: string;
   content?: string;
   createdAt: string;
@@ -34,7 +39,6 @@ interface ChatThread {
 }
 
 function ChatContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const userParam = searchParams.get('user') || searchParams.get('thread');
   const userNameParam = searchParams.get('userName');
@@ -42,7 +46,7 @@ function ChatContent() {
   const petIdParam = searchParams.get('petId');
   const petStatusParam = searchParams.get('petStatus');
 
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   const [threads, setThreads] = useState<ChatThread[]>([]);
@@ -87,11 +91,12 @@ function ChatContent() {
 
         // Requirement 4: เมื่อกดแชทจากหน้าอื่น หากไม่เคยคุยกัน ประวัติจะว่างเปล่าและสร้างห้องใหม่
         if (userParam) {
+          const targetPetId = petIdParam || undefined;
           const found = loadedThreads.find(
-            (t) =>
-              t.userId === userParam ||
-              t.id === userParam ||
-              (userNameParam && t.userName.toLowerCase() === userNameParam.toLowerCase())
+            (thread) =>
+              (thread.userId === userParam
+                || (userNameParam && thread.userName.toLowerCase() === userNameParam.toLowerCase()))
+              && thread.petId === targetPetId
           );
 
           if (found) {
@@ -101,22 +106,23 @@ function ChatContent() {
             setActiveThreadId(found.id);
           } else {
             // ไม่เคยคุยกันมาก่อน (Never talked with him before) -> สร้างห้องสนทนาใหม่ที่มีประวัติว่าง (empty)
+            const threadId = `${userParam}:${targetPetId || 'general'}`;
             const newThread: ChatThread = {
-              id: userParam,
+              id: threadId,
               userId: userParam,
               userName: userNameParam || 'ผู้ติดต่อ',
               petName: petNameParam || 'สัตว์เลี้ยง',
-              petId: petIdParam || undefined,
+              petId: targetPetId,
               petStatus: petStatusParam || 'available',
               lastMessage: 'เริ่มการสนทนาใหม่',
               time: 'เมื่อสักครู่',
               isNew: true,
             };
             loadedThreads = [newThread, ...loadedThreads];
-            setActiveThreadId(userParam);
+            setActiveThreadId(threadId);
           }
-        } else if (loadedThreads.length > 0 && !activeThreadId) {
-          setActiveThreadId(loadedThreads[0].id);
+        } else if (loadedThreads.length > 0) {
+          setActiveThreadId((current) => current || loadedThreads[0].id);
         }
 
         setThreads(loadedThreads);
@@ -129,37 +135,38 @@ function ChatContent() {
   }, [currentUser, userParam, userNameParam, petNameParam, petIdParam, petStatusParam]);
 
   const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || null;
+  const activeThreadUserId = activeThread?.userId;
+  const activeThreadPetId = activeThread?.petId;
+  const activeThreadIsNew = activeThread?.isNew;
+  const displayedMessages = activeThreadIsNew ? [] : messages;
+  const showingMessagesLoading = isLoadingMessages && !activeThreadIsNew;
 
   // 3. โหลดข้อความแชทจริงของห้องที่เลือก (Strict Privacy: เฉพาะคู่สนทนาเท่านั้น)
   useEffect(() => {
-    if (!currentUser || !activeThread) {
-      setMessages([]);
-      return;
-    }
+    if (!currentUser || !activeThreadUserId || activeThreadIsNew) return;
 
-    if (activeThread.isNew) {
-      setMessages([]);
-      return;
-    }
-
+    let cancelled = false;
     const fetchMessages = async () => {
       try {
         setIsLoadingMessages(true);
-        const res = await api.messages.getHistory(activeThread.userId, activeThread.petId);
+        const res = await api.messages.getHistory(activeThreadUserId, activeThreadPetId);
         if (res.success && Array.isArray(res.data)) {
-          setMessages(res.data);
+          if (!cancelled) setMessages(res.data);
         } else {
-          setMessages([]);
+          if (!cancelled) setMessages([]);
         }
       } catch {
-        setMessages([]);
+        if (!cancelled) setMessages([]);
       } finally {
-        setIsLoadingMessages(false);
+        if (!cancelled) setIsLoadingMessages(false);
       }
     };
 
     fetchMessages();
-  }, [currentUser, activeThread?.id, activeThread?.userId, activeThread?.petId, activeThread?.isNew]);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, activeThread?.id, activeThreadUserId, activeThreadPetId, activeThreadIsNew]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -307,11 +314,14 @@ function ChatContent() {
                 {/* Top Bar: เกี่ยวกับสัตว์เลี้ยง */}
                 <header className="p-4 border-b border-gray-300 flex items-center justify-between gap-4 bg-white">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden border border-blue-200 shrink-0">
+                    <div className="relative w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden border border-blue-200 shrink-0">
                       {activeThread.petImage ? (
-                        <img
+                        <Image
                           src={activeThread.petImage}
                           alt={activeThread.petName}
+                          fill
+                          sizes="36px"
+                          unoptimized
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -373,12 +383,12 @@ function ChatContent() {
 
                 {/* กล่องข้อความแชท (Message History) */}
                 <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white min-h-[360px] flex flex-col justify-start">
-                  {isLoadingMessages ? (
+                  {showingMessagesLoading ? (
                     <div className="flex-1 flex items-center justify-center text-gray-400 text-xs gap-2 my-auto">
                       <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
                       <span>กำลังโหลดข้อความ...</span>
                     </div>
-                  ) : messages.length === 0 ? (
+                  ) : displayedMessages.length === 0 ? (
                     /* Requirement 4: หากไม่เคยคุยกัน ประวัติจะว่าง (empty) และสามารถพิมพ์ข้อความหาเขาได้ */
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3 my-auto animate-in fade-in">
                       <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
@@ -394,7 +404,7 @@ function ChatContent() {
                       </div>
                     </div>
                   ) : (
-                    messages.map((msg) => {
+                    displayedMessages.map((msg) => {
                       const isMe = msg.senderId === currentUser.id;
                       const text = msg.message || msg.content || '';
                       const timeStr = new Date(msg.createdAt).toLocaleTimeString('th-TH', {

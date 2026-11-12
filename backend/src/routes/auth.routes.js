@@ -5,7 +5,10 @@ const { apiError, asyncHandler } = require('../utils/http');
 
 function createAuthRouter(prisma) {
   const router = express.Router();
-  const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
+  const JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is required to configure authentication');
+  }
 
   function extractToken(request) {
     const authHeader = request.headers.authorization;
@@ -147,6 +150,13 @@ function createAuthRouter(prisma) {
   // POST / (Handles login or register via action field)
   router.post('/', asyncHandler(async (request, response) => {
     const { action } = request.body || {};
+    if (action !== 'login' && action !== 'register') {
+      return response.status(400).json({
+        success: false,
+        message: 'กรุณาระบุ action เป็น login หรือ register',
+      });
+    }
+
     if (action === 'register') {
       return handleRegister(request, response);
     }
@@ -163,34 +173,43 @@ function createAuthRouter(prisma) {
       return response.json({ success: false, user: null });
     }
 
+    let payload;
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      const userId = payload.id || payload.userId || payload.sub;
-      if (!userId) {
-        return response.json({ success: false, user: null });
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch (error) {
+      if (error.name !== 'JsonWebTokenError' && error.name !== 'TokenExpiredError') {
+        throw error;
       }
-
-      const user = await prisma.user.findUnique({
-        where: { id: String(userId) },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          phoneNumber: true,
-          profileImage: true,
-          isVerified: true,
-          role: true,
-        },
-      });
-
-      if (!user) {
-        return response.json({ success: false, user: null });
-      }
-
-      return response.json({ success: true, user });
-    } catch {
       return response.json({ success: false, user: null });
     }
+
+    if (!payload || typeof payload !== 'object') {
+      return response.json({ success: false, user: null });
+    }
+
+    const userId = payload.id || payload.userId || payload.sub;
+    if (!userId) {
+      return response.json({ success: false, user: null });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: String(userId) },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phoneNumber: true,
+        profileImage: true,
+        isVerified: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      return response.json({ success: false, user: null });
+    }
+
+    return response.json({ success: true, user });
   }));
 
   // POST /logout

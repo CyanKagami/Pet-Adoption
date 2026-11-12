@@ -3,10 +3,28 @@
 
 import { useState, useEffect, useRef, use, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Plus, X, UploadCloud, ChevronDown, Check, Loader2, CheckCircle2 } from 'lucide-react';
+import Image from 'next/image';
+import { X, UploadCloud, ChevronDown, Check, Loader2, CheckCircle2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import { PET_UPDATE_PERIODS, type Pet, type PetOwner, type PetUpdatePeriod } from '@/types/pet';
+
+type AuthenticatedUser = Pick<PetOwner, 'id'>;
+
+interface ApiErrorDetails {
+  code?: string;
+  message?: string;
+}
+
+function getApiErrorDetails(value: unknown): ApiErrorDetails {
+  if (!value || typeof value !== 'object' || !('error' in value)) return {};
+  const error = value.error;
+  if (!error || typeof error !== 'object') return {};
+  return {
+    code: 'code' in error && typeof error.code === 'string' ? error.code : undefined,
+    message: 'message' in error && typeof error.message === 'string' ? error.message : undefined,
+  };
+}
 
 interface PetUpdatesPageProps {
   params: Promise<{ id: string }>;
@@ -14,7 +32,8 @@ interface PetUpdatesPageProps {
 
 interface PetUpdateItem {
   id: string;
-  period: string;
+  petId: string;
+  period: PetUpdatePeriod;
   description?: string | null;
   images: string[];
   createdAt: string;
@@ -22,13 +41,11 @@ interface PetUpdateItem {
 
 function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const { id } = use(params);
-  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [pet, setPet] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [period, setPeriod] = useState('1 เดือน');
+  const [pet, setPet] = useState<Pet | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [period, setPeriod] = useState<PetUpdatePeriod>('1m');
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
   const periodDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -53,36 +70,39 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const fetchPetAndUpdates = async () => {
-    try {
-      setLoading(true);
-      const authRes = await api.auth.me().catch(() => null);
-      if (authRes?.success && authRes.user) {
-        setCurrentUser(authRes.user);
-      }
-
-      const petRes = await api.pets.getById(id);
-      if (petRes.success && petRes.data) {
-        setPet(petRes.data);
-      }
-
-      setLoadingUpdates(true);
-      const updatesRes = await api.petUpdates.getForPet(id);
-      if (updatesRes.success && Array.isArray(updatesRes.data)) {
-        setRealUpdates(updatesRes.data);
-      } else {
-        setRealUpdates([]);
-      }
-    } catch (err) {
-      console.error('Failed to load pet and updates:', err);
-    } finally {
-      setLoading(false);
-      setLoadingUpdates(false);
-    }
-  };
-
   useEffect(() => {
-    fetchPetAndUpdates();
+    let cancelled = false;
+    const loadPetAndUpdates = async () => {
+      try {
+        const authRes = await api.auth.me().catch(() => null);
+        if (!cancelled && authRes?.success && authRes.user) {
+          setCurrentUser(authRes.user);
+        }
+
+        const petRes = await api.pets.getById(id);
+        if (!cancelled && petRes.success && petRes.data) {
+          setPet(petRes.data);
+        }
+
+        if (cancelled) return;
+        setLoadingUpdates(true);
+        const updatesRes = await api.petUpdates.getForPet(id);
+        if (!cancelled) {
+          setRealUpdates(
+            updatesRes.success && Array.isArray(updatesRes.data) ? updatesRes.data : []
+          );
+        }
+      } catch (err) {
+        if (!cancelled) console.error('Failed to load pet and updates:', err);
+      } finally {
+        if (!cancelled) setLoadingUpdates(false);
+      }
+    };
+
+    void loadPetAndUpdates();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   const handleImageUpload = (files: FileList | null) => {
@@ -116,9 +136,10 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
 
     setIsSubmitting(true);
     try {
+      const periodLabel = PET_UPDATE_PERIODS.find((item) => item.value === period)?.label || period;
       const res = await api.petUpdates.create(id, {
         period,
-        description: `อัปเดตความเป็นอยู่รอบ ${period}`,
+        description: `อัปเดตความเป็นอยู่รอบ ${periodLabel}`,
         images,
       });
 
@@ -129,11 +150,11 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
           await api.messages.sendMessage({
             receiverId: ownerId,
             petId: id,
-            message: `📷 มีการส่งรูปภาพอัปเดตความเป็นอยู่ของน้อง '${petName}' รอบ ${period} เรียบร้อยแล้ว สามารถคลิกดูอัปเดตได้เลยครับ/ค่ะ`,
+            message: `📷 มีการส่งรูปภาพอัปเดตความเป็นอยู่ของน้อง '${petName}' รอบ ${periodLabel} เรียบร้อยแล้ว สามารถคลิกดูอัปเดตได้เลยครับ/ค่ะ`,
           }).catch(() => null);
         }
 
-        setActionNotice(`ส่งรูปภาพอัปเดตความเป็นอยู่รอบ '${period}' เรียบร้อยแล้ว`);
+        setActionNotice(`ส่งรูปภาพอัปเดตความเป็นอยู่รอบ '${periodLabel}' เรียบร้อยแล้ว`);
         setImages([]);
         setHasAttemptedSubmit(false);
         // รีเฟรชรายการอัปเดตจริงจากฐานข้อมูล
@@ -145,8 +166,9 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
           setActionNotice(null);
         }, 4000);
       } else {
-        const errorCode = (res as any)?.error?.code;
-        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถส่งรูปภาพอัปเดตได้';
+        const errorDetails = getApiErrorDetails(res);
+        const errorCode = errorDetails.code;
+        let msg = res.message || errorDetails.message || 'ไม่สามารถส่งรูปภาพอัปเดตได้';
         if (errorCode === 'PET_NOT_ADOPTED') {
           msg = 'สัตว์เลี้ยงต้องมีสถานะได้รับเลี้ยงแล้ว (Adopted) ถึงจะส่งรูปอัปเดตได้';
         } else if (errorCode === 'FORBIDDEN') {
@@ -168,7 +190,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const petName = pet?.name || 'โมจิ';
 
   // ค้นหารูปภาพของรอบที่ระบุจากฐานข้อมูล
-  const getUpdatesForPeriod = (periodName: string) => {
+  const getUpdatesForPeriod = (periodName: PetUpdatePeriod) => {
     return realUpdates.filter((u) => u.period === periodName);
   };
 
@@ -241,16 +263,16 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
               </div>
             ) : (
               <div className="space-y-6">
-                {['1 เดือน', '3 เดือน', '5 เดือน', '1 ปี'].map((periodLabel) => {
-                  const updatesForThisPeriod = getUpdatesForPeriod(periodLabel);
+                {PET_UPDATE_PERIODS.map(({ value, label }) => {
+                  const updatesForThisPeriod = getUpdatesForPeriod(value);
                   const hasUpdates = updatesForThisPeriod.length > 0;
                   const allImages = updatesForThisPeriod.flatMap((u) => u.images);
 
                   return (
-                    <div key={periodLabel} className="border border-gray-200 rounded-lg p-5 space-y-3 bg-gray-50/40">
+                    <div key={value} className="border border-gray-200 rounded-lg p-5 space-y-3 bg-gray-50/40">
                       <div className="flex items-center justify-between">
                         <h3 className="text-base font-bold text-gray-900">
-                          รอบ {periodLabel}
+                          รอบ {label}
                         </h3>
                         {hasUpdates ? (
                           <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
@@ -271,9 +293,12 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                                 key={imgIdx}
                                 className="h-28 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-2xs group relative"
                               >
-                                <img
+                                <Image
                                   src={imgUrl}
-                                  alt={`อัปเดต ${periodLabel} รูปที่ ${imgIdx + 1}`}
+                                  alt={`อัปเดต ${label} รูปที่ ${imgIdx + 1}`}
+                                  fill
+                                  sizes="(max-width: 640px) 50vw, 25vw"
+                                  unoptimized
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                 />
                               </div>
@@ -322,26 +347,28 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                     onClick={() => setIsPeriodOpen((prev) => !prev)}
                     className="w-full h-10 px-3 bg-white rounded-md text-sm text-left flex items-center justify-between border border-gray-400 hover:border-gray-500 transition-colors cursor-pointer"
                   >
-                    <span className="text-gray-900">{period}</span>
+                    <span className="text-gray-900">
+                      {PET_UPDATE_PERIODS.find((item) => item.value === period)?.label}
+                    </span>
                     <ChevronDown className="w-4 h-4 text-gray-500" />
                   </button>
 
                   {isPeriodOpen && (
                     <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg py-1 z-30 animate-in fade-in zoom-in-95">
-                      {['1 เดือน', '3 เดือน', '5 เดือน', '1 ปี'].map((opt) => (
+                      {PET_UPDATE_PERIODS.map(({ value, label }) => (
                         <button
-                          key={opt}
+                          key={value}
                           type="button"
                           onClick={() => {
-                            setPeriod(opt);
+                            setPeriod(value);
                             setIsPeriodOpen(false);
                           }}
                           className={`w-full text-left px-3.5 py-2 text-sm flex items-center justify-between hover:bg-gray-100 cursor-pointer ${
-                            period === opt ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-800'
+                            period === value ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-gray-800'
                           }`}
                         >
-                          <span>{opt}</span>
-                          {period === opt && <Check className="w-4 h-4 text-blue-600" />}
+                          <span>{label}</span>
+                          {period === value && <Check className="w-4 h-4 text-blue-600" />}
                         </button>
                       ))}
                     </div>
@@ -387,7 +414,14 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                       >
                         {img ? (
                           <>
-                            <img src={img} alt="" className="w-full h-full object-cover" />
+                            <Image
+                              src={img}
+                              alt=""
+                              fill
+                              sizes="(max-width: 640px) 33vw, 20vw"
+                              unoptimized
+                              className="w-full h-full object-cover"
+                            />
                             <button
                               type="button"
                               onClick={() => removeImage(slotIdx)}
@@ -448,13 +482,22 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                   {realUpdates.map((item) => (
                     <div key={item.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50/50 space-y-2">
                       <div className="flex items-center justify-between text-xs text-gray-600">
-                        <span className="font-bold text-gray-900">รอบ {item.period}</span>
+                        <span className="font-bold text-gray-900">
+                          รอบ {PET_UPDATE_PERIODS.find((option) => option.value === item.period)?.label || item.period}
+                        </span>
                         <span>{new Date(item.createdAt).toLocaleDateString('th-TH')}</span>
                       </div>
                       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                         {item.images.map((imgUrl, idx) => (
                           <div key={idx} className="h-20 rounded-md overflow-hidden border border-gray-200">
-                            <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                            <Image
+                              src={imgUrl}
+                              alt=""
+                              fill
+                              sizes="(max-width: 640px) 33vw, 20vw"
+                              unoptimized
+                              className="w-full h-full object-cover"
+                            />
                           </div>
                         ))}
                       </div>

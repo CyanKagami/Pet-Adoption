@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use, Suspense } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Heart,
@@ -13,7 +14,10 @@ import {
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import type { Pet, PetOwner } from '@/types/pet';
 import { Button } from '@/components/ui/button';
+
+type AuthenticatedUser = Pick<PetOwner, 'id'>;
 
 interface PetDetailPageProps {
   params: Promise<{ id: string }>;
@@ -23,9 +27,9 @@ function PetDetailContent({ params }: PetDetailPageProps) {
   const { id } = use(params);
   const router = useRouter();
 
-  const [pet, setPet] = useState<any>(null);
+  const [pet, setPet] = useState<Pet | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [isWishlistLoading, setIsWishlistLoading] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -56,7 +60,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
           setCurrentUser(authRes.user);
           const wishRes = await api.wishlist.getAll();
           if (wishRes.success && Array.isArray(wishRes.data)) {
-            const found = wishRes.data.some((item: any) => item.id === id);
+            const found = wishRes.data.some((item) => item.id === id);
             setIsWishlisted(found);
           }
         }
@@ -143,10 +147,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
 
   const imagesList = pet.images && pet.images.length > 0 ? pet.images : [];
   const rawCurrentImg = imagesList[selectedImageIndex];
-  const currentImage =
-    typeof rawCurrentImg === 'string'
-      ? rawCurrentImg
-      : rawCurrentImg?.imageUrl || pet.image || null;
+  const currentImage = rawCurrentImg?.imageUrl || pet.image || null;
 
   // จัดรูปแบบอายุ
   const ageDisplay = pet.ageMonths
@@ -197,9 +198,12 @@ function PetDetailContent({ params }: PetDetailPageProps) {
             {/* กล่องรูปหลัก (ความสูง ~350px พร้อม fallback รูปหลัก แบบกล่องเส้นประสีเทา) */}
             <div className="w-full h-80 sm:h-96 bg-[#e5e7eb] rounded-xl border border-border overflow-hidden flex items-center justify-center relative">
               {currentImage ? (
-                <img
+                <Image
                   src={currentImage}
                   alt={pet.name}
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  unoptimized
                   className="w-full h-full object-cover"
                 />
               ) : (
@@ -221,14 +225,21 @@ function PetDetailContent({ params }: PetDetailPageProps) {
                     key={idx}
                     type="button"
                     onClick={() => setSelectedImageIndex(idx)}
-                    className={`h-20 rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden transition-all cursor-pointer ${
+                    className={`relative h-20 rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden transition-all cursor-pointer ${
                       isSelected
                         ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                         : 'border-gray-300 bg-[#f3f4f6] hover:border-gray-400'
                     }`}
                   >
                     {thumbImage ? (
-                      <img src={thumbImage} alt="" className="w-full h-full object-cover" />
+                      <Image
+                        src={thumbImage}
+                        alt=""
+                        fill
+                        sizes="25vw"
+                        unoptimized
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <span className="text-xs text-gray-500 font-medium">รูป</span>
                     )}
@@ -364,9 +375,16 @@ function PetDetailContent({ params }: PetDetailPageProps) {
             <div className="space-y-2.5 text-sm">
               {/* รูป & ชื่อผู้โพสต์ */}
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
+                <div className="relative w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm overflow-hidden">
                   {pet.owner?.profileImage ? (
-                    <img src={pet.owner.profileImage} alt="" className="w-full h-full rounded-full object-cover" />
+                    <Image
+                      src={pet.owner.profileImage}
+                      alt=""
+                      fill
+                      sizes="40px"
+                      unoptimized
+                      className="w-full h-full rounded-full object-cover"
+                    />
                   ) : (
                     <User className="w-5 h-5 text-primary" />
                   )}
@@ -404,7 +422,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
           <div className="bg-white border border-border rounded-xl p-6 shadow-2xs space-y-4 flex flex-col justify-between">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์ (FR-10)</h2>
+                <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์</h2>
                 {currentUser && currentUser.id !== (pet.owner?.id || pet.ownerId) && (
                   <Link
                     href={`/reviews?targetUserId=${pet.owner?.id || pet.ownerId}&targetUserName=${encodeURIComponent(
@@ -420,7 +438,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
               {/* รายการรีวิวจริงจากฐานข้อมูล */}
               {pet.ownerStats?.reviews && pet.ownerStats.reviews.length > 0 ? (
                 <div className="space-y-3 text-sm">
-                  {pet.ownerStats.reviews.slice(0, 3).map((rev: any) => (
+                  {pet.ownerStats.reviews.slice(0, 3).map((rev) => (
                     <div key={rev.id} className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="text-amber-400 text-xs tracking-wider">
