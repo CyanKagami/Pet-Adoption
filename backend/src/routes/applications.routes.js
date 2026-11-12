@@ -275,41 +275,44 @@ function createApplicationManagementRouter(prisma) {
     if (s === 'ACCEPTED' || s === 'APPROVED') mappedStatus = 'APPROVED';
     else if (s === 'CANCELLED' || s === 'REJECTED') mappedStatus = 'CANCELLED';
 
-    const updated = await prisma.application.update({
-      where: { id },
-      data: { status: mappedStatus },
-      include: {
-        pet: true,
-        applicant: true,
-      },
+    const updated = await prisma.$transaction(async (transaction) => {
+      const transition = await transaction.application.updateMany({
+        where: { id, status: { not: mappedStatus } },
+        data: { status: mappedStatus },
+      });
+
+      if (transition.count > 0 && mappedStatus === 'APPROVED') {
+        await transaction.pet.update({
+          where: { id: application.petId },
+          data: { status: 'PENDING' },
+        });
+        await transaction.message.create({
+          data: {
+            senderId: request.user.id,
+            receiverId: application.applicantId,
+            petId: application.petId,
+            content: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง "${application.pet.name}" เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
+          },
+        });
+      } else if (transition.count > 0 && mappedStatus === 'CANCELLED') {
+        await transaction.message.create({
+          data: {
+            senderId: request.user.id,
+            receiverId: application.applicantId,
+            petId: application.petId,
+            content: `ขออภัยด้วยครับ/ค่ะ คำขอรับเลี้ยงน้อง "${application.pet.name}" ไม่ผ่านการคัดเลือกในครั้งนี้ ขอขอบคุณที่ให้ความสนใจและรักสัตว์เลี้ยงครับ/ค่ะ`,
+          },
+        });
+      }
+
+      return transaction.application.findUnique({
+        where: { id },
+        include: {
+          pet: true,
+          applicant: true,
+        },
+      });
     });
-
-    if (mappedStatus === 'APPROVED') {
-      // 1. Update pet status to PENDING
-      await prisma.pet.update({
-        where: { id: application.petId },
-        data: { status: 'PENDING' },
-      }).catch(() => null);
-
-      // 2. Notify recipient via automated message to start immediate conversation
-      await prisma.message.create({
-        data: {
-          senderId: request.user.id,
-          receiverId: application.applicantId,
-          petId: application.petId,
-          content: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง "${application.pet.name}" เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
-        },
-      }).catch(() => null);
-    } else if (mappedStatus === 'CANCELLED') {
-      await prisma.message.create({
-        data: {
-          senderId: request.user.id,
-          receiverId: application.applicantId,
-          petId: application.petId,
-          content: `ขออภัยด้วยครับ/ค่ะ คำขอรับเลี้ยงน้อง "${application.pet.name}" ไม่ผ่านการคัดเลือกในครั้งนี้ ขอขอบคุณที่ให้ความสนใจและรักสัตว์เลี้ยงครับ/ค่ะ`,
-        },
-      }).catch(() => null);
-    }
 
     response.json({ success: true, data: serializeApplication(updated) });
   }));

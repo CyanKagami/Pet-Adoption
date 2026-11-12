@@ -6,6 +6,61 @@ const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
 const { serializeApplication } = require('../utils/serializers');
 
+async function updatePetWithAdoptionNotification(prisma, petId, ownerId, updateData, include) {
+  const where = { id: petId };
+  const options = { where, data: updateData };
+  if (include) options.include = include;
+
+  if (updateData.status !== 'ADOPTED') {
+    return prisma.pet.update(options);
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const transition = await transaction.pet.updateMany({
+      where: { ...where, status: { not: 'ADOPTED' } },
+      data: updateData,
+    });
+
+    if (transition.count === 0) {
+      const otherUpdateData = { ...updateData };
+      delete otherUpdateData.status;
+      if (Object.keys(otherUpdateData).length > 0) {
+        return transaction.pet.update({
+          where,
+          data: otherUpdateData,
+          ...(include ? { include } : {}),
+        });
+      }
+      return transaction.pet.findUnique({
+        where,
+        ...(include ? { include } : {}),
+      });
+    }
+
+    const updatedPet = await transaction.pet.findUnique({
+      where,
+      ...(include ? { include } : {}),
+    });
+    const approvedApplication = await transaction.application.findFirst({
+      where: { petId, status: 'APPROVED' },
+      select: { applicantId: true },
+    });
+
+    if (approvedApplication) {
+      await transaction.message.create({
+        data: {
+          senderId: ownerId,
+          receiverId: approvedApplication.applicantId,
+          petId,
+          content: `🎉 ยืนยันการรับเลี้ยงน้อง "${updatedPet.name}" เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ คุณสามารถเริ่มส่งรูปอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
+        },
+      });
+    }
+
+    return updatedPet;
+  });
+}
+
 function createPetsRouter(prisma) {
   const router = express.Router();
   const requireAuth = createRequireAuth(prisma);
@@ -321,33 +376,18 @@ function createPetsRouter(prisma) {
 
     const pet = await prisma.pet.findUnique({
       where: { id: request.params.pet_id },
-      select: { id: true, name: true, ownerId: true },
+      select: { id: true, ownerId: true },
     });
     if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
     if (pet.ownerId !== request.user.id) throw apiError('FORBIDDEN', 'Only the pet owner can update this status', undefined, 403);
 
     const targetStatus = request.body.status === 'adopted' ? 'ADOPTED' : 'AVAILABLE';
-    const updatedPet = await prisma.pet.update({
-      where: { id: pet.id },
-      data: { status: targetStatus },
-    });
-
-    if (targetStatus === 'ADOPTED') {
-      const approvedApp = await prisma.application.findFirst({
-        where: { petId: pet.id, status: 'APPROVED' },
-        include: { applicant: true },
-      });
-      if (approvedApp) {
-        await prisma.message.create({
-          data: {
-            senderId: request.user.id,
-            receiverId: approvedApp.applicantId,
-            petId: pet.id,
-            content: `🎉 ยืนยันการรับเลี้ยงน้อง "${pet.name}" เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ คุณสามารถเริ่มส่งรูปอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
-          },
-        }).catch(() => null);
-      }
-    }
+    const updatedPet = await updatePetWithAdoptionNotification(
+      prisma,
+      pet.id,
+      request.user.id,
+      { status: targetStatus },
+    );
 
     response.json({
       success: true,
@@ -385,31 +425,17 @@ function createPetsRouter(prisma) {
       }
     }
 
-    const updatedPet = await prisma.pet.update({
-      where: { id: pet.id },
-      data: updateData,
-      include: {
-        images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-        owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
-      },
-    });
-
-    if (updateData.status === 'ADOPTED') {
-      const approvedApp = await prisma.application.findFirst({
-        where: { petId: pet.id, status: 'APPROVED' },
-        include: { applicant: true },
-      });
-      if (approvedApp) {
-        await prisma.message.create({
-          data: {
-            senderId: request.user.id,
-            receiverId: approvedApp.applicantId,
-            petId: pet.id,
-            content: `🎉 ยืนยันการรับเลี้ยงน้อง "${pet.name}" เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ คุณสามารถเริ่มส่งรูปอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
-          },
-        }).catch(() => null);
-      }
-    }
+    const petInclude = {
+      images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+      owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
+    };
+    const updatedPet = await updatePetWithAdoptionNotification(
+      prisma,
+      pet.id,
+      request.user.id,
+      updateData,
+      petInclude,
+    );
 
     response.json({
       success: true,

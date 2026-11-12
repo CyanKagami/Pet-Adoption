@@ -124,15 +124,6 @@ function NotificationsContent() {
         await api.applications.updateStatus(selectedNotif.dbId, 'accepted');
       }
 
-      // ส่งข้อความแชทแจ้งเตือนผู้รับเลี้ยงทันที
-      if (selectedNotif.applicantId && selectedNotif.petId) {
-        await api.messages.sendMessage({
-          receiverId: selectedNotif.applicantId,
-          petId: selectedNotif.petId,
-          message: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง "${selectedNotif.petName}" เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้ทางแชทนี้เลยครับ/ค่ะ`,
-        }).catch(() => null);
-      }
-
       setNotifications((prev) =>
         prev.map((n) =>
           n.id === selectedNotif.id
@@ -154,19 +145,12 @@ function NotificationsContent() {
     }
   };
 
-  // ยืนยันสถานะ adopted จากหน้าแจ้งเตือน พร้อมแจ้งเตือนผู้รับเลี้ยง
+  // ยืนยันสถานะ adopted จากหน้าแจ้งเตือน
   const handleConfirmAdoptedFromNotification = async () => {
     if (!selectedNotif || !selectedNotif.petId) return;
     setIsUpdatingStatus(true);
     try {
       await api.pets.update(selectedNotif.petId, { status: 'adopted' });
-      if (selectedNotif.applicantId) {
-        await api.messages.sendMessage({
-          receiverId: selectedNotif.applicantId,
-          petId: selectedNotif.petId,
-          message: `🎉 ยืนยันการรับเลี้ยงน้อง "${selectedNotif.petName}" เรียบร้อยแล้ว ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ! สามารถส่งรูปภาพอัปเดตความเป็นอยู่และเขียนรีวิวได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
-        }).catch(() => null);
-      }
 
       setNotifications((prev) =>
         prev.map((n) =>

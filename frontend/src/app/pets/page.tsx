@@ -124,20 +124,6 @@ function MyPostsContent() {
     try {
       const res = await api.pets.update(confirmAdoptPet.id, { status: 'adopted' });
       if (res.success) {
-        const approvedApp =
-          (confirmAdoptPet.applications || []).find(
-            (application) => application.status === 'APPROVED' || application.status === 'approved' || application.status === 'accepted'
-          ) || (confirmAdoptPet.applications && confirmAdoptPet.applications[0]);
-
-        const recipientId = approvedApp?.applicant?.id || approvedApp?.applicantId;
-        if (recipientId) {
-          await api.messages.sendMessage({
-            receiverId: recipientId,
-            petId: confirmAdoptPet.id,
-            message: `🎉 ยืนยันการรับเลี้ยงน้อง '${confirmAdoptPet.name}' เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ! คุณสามารถเริ่มส่งรูปภาพอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
-          }).catch(() => null);
-        }
-
         setPets((prev) =>
           prev.map((p) => (p.id === confirmAdoptPet.id ? { ...p, status: 'adopted' } : p))
         );
@@ -186,7 +172,6 @@ function MyPostsContent() {
   const handleSelectApplicant = async (
     petId: string,
     applicationId?: string,
-    applicantId?: string,
     applicantName = 'ผู้สนใจ'
   ) => {
     try {
@@ -195,21 +180,13 @@ function MyPostsContent() {
       }
       const res = await api.pets.update(petId, { status: 'pending' });
 
-      if (applicantId) {
-        await api.messages.sendMessage({
-          receiverId: applicantId,
-          petId,
-          message: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง '${viewApplicantsPet?.name || 'สัตว์เลี้ยง'}' เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
-        }).catch(() => null);
-      }
-
       if (res.success) {
         setPets((prev) =>
           prev.map((p) => (p.id === petId ? { ...p, status: 'pending' } : p))
         );
         showNotification(
           'success',
-          `เลือก '${applicantName}' สำหรับการรับเลี้ยง (สถานะเป็น pending) และส่งข้อความแจ้งเตือนผู้รับเลี้ยงเรียบร้อยแล้ว`
+          `เลือก '${applicantName}' สำหรับการรับเลี้ยง (สถานะเป็น pending) เรียบร้อยแล้ว`
         );
         setViewApplicantsPet(null);
         fetchMyPets();
@@ -803,7 +780,6 @@ function MyPostsContent() {
                               handleSelectApplicant(
                                 viewApplicantsPet.id,
                                 app.id,
-                                app.applicant?.id || app.applicantId,
                                 app.applicant?.fullName || 'ผู้สนใจ'
                               )
                             }
@@ -813,7 +789,7 @@ function MyPostsContent() {
                                 : 'bg-blue-600 hover:bg-blue-700 text-white'
                             }`}
                           >
-                            {isSelected ? 'เลือกแล้ว (แจ้งเตือนซ้ำ)' : 'เลือกผู้รับเลี้ยงนี้ (เป็น pending)'}
+                            {isSelected ? 'เลือกแล้ว' : 'เลือกผู้รับเลี้ยงนี้ (เป็น pending)'}
                           </Button>
                         </div>
                       </div>

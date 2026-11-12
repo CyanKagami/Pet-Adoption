@@ -21,6 +21,7 @@ const applicantId = randomUUID();
 const fixture = {
   petId: randomUUID(),
   applicationPetId: randomUUID(),
+  applicationId: null,
   adoptedPetId: randomUUID(),
   petName: `API test pet ${randomUUID()}`,
   location: `API test location ${randomUUID()}`,
@@ -85,6 +86,19 @@ async function expectApiError(path, { status, code, ...options }) {
   const { response, body } = await request(path, options);
   assert.equal(response.status, status);
   assert.equal(body.error.code, code);
+}
+
+async function countSystemMessages(petId, contentPrefix) {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) AS count
+       FROM messages
+      WHERE pet_id = $1
+        AND sender_id = $2
+        AND receiver_id = $3
+        AND content LIKE $4`,
+    [petId, ownerId, applicantId, `${contentPrefix}%`],
+  );
+  return Number(rows[0].count);
 }
 
 async function createTestUser(id, name) {
@@ -572,6 +586,43 @@ describe('Pet adoption API', () => {
       assert.equal(body.data.updated_status, 'adopted');
     });
 
+    it('PATCH pet status routes send one completion message per adoption transition', async () => {
+      const contentPrefix = `🎉 ยืนยันการรับเลี้ยงน้อง "Adopted ${fixture.petName}"`;
+      const routes = [
+        `/pets/${fixture.adoptedPetId}`,
+        `/pets/${fixture.adoptedPetId}/status`,
+      ];
+
+      for (const route of routes) {
+        await pool.query(
+          `UPDATE pets SET status = 'PENDING' WHERE id = $1`,
+          [fixture.adoptedPetId],
+        );
+        const beforeCount = await countSystemMessages(fixture.adoptedPetId, contentPrefix);
+        const body = JSON.stringify({ status: 'adopted' });
+        const options = { method: 'PATCH', token: fixture.ownerToken, body };
+        const responses = await Promise.all([
+          request(route, options),
+          request(route, options),
+        ]);
+
+        assert.ok(responses.every(({ response, body: responseBody }) => (
+          response.status === 200 && responseBody.success
+        )));
+        assert.equal(
+          await countSystemMessages(fixture.adoptedPetId, contentPrefix),
+          beforeCount + 1,
+        );
+
+        const replay = await request(route, options);
+        assert.equal(replay.response.status, 200);
+        assert.equal(
+          await countSystemMessages(fixture.adoptedPetId, contentPrefix),
+          beforeCount + 1,
+        );
+      }
+    });
+
     it('GET /pets filters by the updated status', async () => {
       const query = new URLSearchParams({ status: 'adopted', location: fixture.location });
       const { response, body } = await request(`/pets?${query}`);
@@ -660,6 +711,7 @@ describe('Pet adoption API', () => {
       assert.equal(body.success, true);
       assert.ok(body.data.application_id);
       assert.ok(body.data.submitted_at);
+      fixture.applicationId = body.data.application_id;
     });
 
     it('POST /pets/:pet_id/applications rejects a duplicate application', async () => {
@@ -705,6 +757,45 @@ describe('Pet adoption API', () => {
         code: 'PET_NOT_FOUND',
         token: fixture.ownerToken,
       });
+    });
+
+    it('PATCH /applications sends the approval message only once per status transition', async () => {
+      assert.ok(fixture.applicationId);
+      const contentPrefix = '🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือก';
+      const beforeCount = await countSystemMessages(fixture.applicationPetId, contentPrefix);
+      const options = {
+        method: 'PATCH',
+        token: fixture.ownerToken,
+        body: JSON.stringify({ id: fixture.applicationId, status: 'accepted' }),
+      };
+
+      const responses = await Promise.all([
+        request('/applications', options),
+        request('/applications', options),
+      ]);
+      assert.ok(responses.every(({ response, body }) => (
+        response.status === 200 && body.success
+      )));
+      assert.equal(
+        await countSystemMessages(fixture.applicationPetId, contentPrefix),
+        beforeCount + 1,
+      );
+
+      const replay = await request('/applications', options);
+      assert.equal(replay.response.status, 200);
+      assert.equal(
+        await countSystemMessages(fixture.applicationPetId, contentPrefix),
+        beforeCount + 1,
+      );
+
+      await pool.query(
+        `UPDATE applications SET status = 'PENDING' WHERE id = $1`,
+        [fixture.applicationId],
+      );
+      await pool.query(
+        `UPDATE pets SET status = 'AVAILABLE' WHERE id = $1`,
+        [fixture.applicationPetId],
+      );
     });
   });
 
