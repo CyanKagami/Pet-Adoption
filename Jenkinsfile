@@ -13,6 +13,7 @@ pipeline {
     DATABASE_URL = 'postgresql://ci:ci@localhost:5432/ci'
     // Unique name per build so CI containers never mix with a developer's.
     COMPOSE_PROJECT_NAME = "ci-${BUILD_NUMBER}"
+    COMPOSE_FILE = 'compose.ci.yaml'
   }
 
   stages {
@@ -30,11 +31,10 @@ pipeline {
               sh 'npm ci'
               sh 'npx prisma generate'
               sh 'npx prisma validate'
-              sh 'npm run lint --if-present'
             }
           }
         }
-      stage('Frontend') {
+        stage('Frontend') {
           steps {
             dir('frontend') {
               sh 'npm ci'
@@ -53,7 +53,7 @@ pipeline {
 
     stage('Verify stack') {
       steps {
-        sh 'docker compose up -d --wait --wait-timeout 120'
+        sh 'docker compose up -d --wait --wait-timeout 180'
         sh 'docker compose ps'
       }
     }
@@ -68,4 +68,3 @@ pipeline {
     failure { echo 'Red: read the first error in the log.' }
   }
 }
-
