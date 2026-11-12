@@ -1,0 +1,66 @@
+# compose.ci.yaml - used only by Jenkins.
+# Differences from compose.yaml:
+#   - no bind mounts (./backend:/app), so the code inside the image is used
+#   - no container_name and no host ports, so CI never clashes with a developer's stack
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-pet_adoption_db}
+    networks:
+      - pet_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-pet_adoption_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pet_adoption_db}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-supersecretjwtkey}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pet_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: http://backend:5000/api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - pet_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/pets?limit=1').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 60s
+
+networks:
+  pet_network:
+    driver: bridge

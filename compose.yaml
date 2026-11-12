@@ -39,17 +39,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "nc", "-z", "127.0.0.1", "5000"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 60s
     volumes:
       - ./backend:/app
       - backend_node_modules:/app/node_modules
     networks:
       - pet_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
 
   # Frontend Service (Next.js App Router)
   frontend:
@@ -72,6 +72,12 @@ services:
       - /app/.next
     networks:
       - pet_network
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
 
 volumes:
   postgres_data:

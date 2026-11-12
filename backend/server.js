@@ -84,3 +84,5 @@ process.on('SIGTERM', async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
+
+app.get('/health', (req, res) => res.sendStatus(200));
