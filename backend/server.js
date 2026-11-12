@@ -7,12 +7,13 @@ const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { PrismaClient } = require('@prisma/client');
 const { createPetsRouter } = require('./src/routes/pets.routes');
-const { createApplicationsRouter } = require('./src/routes/applications.routes');
+const { createApplicationsRouter, createApplicationManagementRouter } = require('./src/routes/applications.routes');
 const { createWishlistsRouter } = require('./src/routes/wishlists.routes');
 const { createUpdatesRouter } = require('./src/routes/updates.routes');
 const { createMessagesRouter } = require('./src/routes/messages.routes');
 const { createReviewsRouter } = require('./src/routes/reviews.routes');
 const { createAuthRouter } = require('./src/routes/auth.routes');
+const { createNotificationsRouter } = require('./src/routes/notifications.routes');
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
@@ -33,6 +34,8 @@ app.use(`${api}/wishlist`, createWishlistsRouter(prisma));
 app.use(`${api}/chats`, createMessagesRouter(prisma));
 app.use(`${api}/messages`, createMessagesRouter(prisma));
 app.use(`${api}/reviews`, createReviewsRouter(prisma));
+app.use(`${api}/applications`, createApplicationManagementRouter(prisma));
+app.use(`${api}/notifications`, createNotificationsRouter(prisma));
 
 app.use((error, _request, response, _next) => {
   if (error instanceof multer.MulterError) {

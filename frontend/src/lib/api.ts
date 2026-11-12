@@ -285,7 +285,11 @@ export const api = {
   notifications: {
     getAll: async () => {
       const res = await fetch('/api/notifications');
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, message: json.message || 'ไม่สามารถดึงข้อมูลการแจ้งเตือนได้', data: [] };
+      }
+      return json;
     },
   },
 };

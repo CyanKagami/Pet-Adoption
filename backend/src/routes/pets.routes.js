@@ -264,6 +264,47 @@ function createPetsRouter(prisma) {
     });
   }));
 
+  router.patch('/:pet_id', requireAuth, asyncHandler(async (request, response) => {
+    const pet = await prisma.pet.findUnique({
+      where: { id: request.params.pet_id },
+      include: {
+        images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
+      },
+    });
+    if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+    if (pet.ownerId !== request.user.id) throw apiError('FORBIDDEN', 'Only the pet owner can update this pet', undefined, 403);
+
+    const updateData = {};
+    if (request.body.name) updateData.name = String(request.body.name).trim();
+    if (request.body.type) updateData.type = String(request.body.type).trim();
+    if (request.body.breed !== undefined) updateData.breed = request.body.breed ? String(request.body.breed).trim() : null;
+    if (request.body.location) updateData.location = String(request.body.location).trim();
+    if (request.body.conditions !== undefined) updateData.adoptionConditions = request.body.conditions;
+    if (request.body.adoptionConditions !== undefined) updateData.adoptionConditions = request.body.adoptionConditions;
+    if (request.body.ageMonths !== undefined) updateData.ageMonths = Number(request.body.ageMonths) || null;
+    if (request.body.status) {
+      const s = String(request.body.status).toUpperCase();
+      if (['AVAILABLE', 'ADOPTED'].includes(s)) {
+        updateData.status = s;
+      }
+    }
+
+    const updatedPet = await prisma.pet.update({
+      where: { id: pet.id },
+      data: updateData,
+      include: {
+        images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
+      },
+    });
+
+    response.json({
+      success: true,
+      data: serializePet(request, updatedPet, true),
+    });
+  }));
+
   return router;
 }
 
