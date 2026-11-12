@@ -326,7 +326,7 @@ function ChatContent() {
                     </div>
                   </div>
 
-                  {/* Action Buttons: [ดูประกาศ] [ดูโปรไฟล์] */}
+                  {/* Action Buttons: [ดูประกาศ] [ดูโปรไฟล์] [ดูอัปเดต] [รีวิว] */}
                   <div className="flex items-center gap-2">
                     {activeThread.petId ? (
                       <Link
@@ -343,6 +343,24 @@ function ChatContent() {
                         ดูประกาศ
                       </Link>
                     )}
+
+                    {activeThread.petId && activeThread.petStatus === 'adopted' && (
+                      <Link
+                        href={`/pets/${activeThread.petId}/updates`}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors cursor-pointer"
+                      >
+                        ดูอัปเดต
+                      </Link>
+                    )}
+
+                    <Link
+                      href={`/reviews?targetUserId=${activeThread.userId}&targetUserName=${encodeURIComponent(
+                        activeThread.userName
+                      )}&petName=${encodeURIComponent(activeThread.petName)}`}
+                      className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer"
+                    >
+                      รีวิว
+                    </Link>
 
                     <Link
                       href={`/notifications?applicant=${activeThread.userId}`}

@@ -121,6 +121,16 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
       });
 
       if (res.success) {
+        // แจ้งเตือนเจ้าของเดิมผ่านแชทเมื่อส่งรูปอัปเดตเรียบร้อย
+        const ownerId = pet?.owner?.id || pet?.ownerId;
+        if (ownerId && ownerId !== currentUser?.id) {
+          await api.messages.sendMessage({
+            receiverId: ownerId,
+            petId: id,
+            message: `📷 มีการส่งรูปภาพอัปเดตความเป็นอยู่ของน้อง '${petName}' รอบ ${period} เรียบร้อยแล้ว สามารถคลิกดูอัปเดตได้เลยครับ/ค่ะ`,
+          }).catch(() => null);
+        }
+
         setActionNotice(`ส่งรูปภาพอัปเดตความเป็นอยู่รอบ '${period}' เรียบร้อยแล้ว`);
         setImages([]);
         setHasAttemptedSubmit(false);

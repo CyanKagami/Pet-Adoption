@@ -86,18 +86,36 @@ function MyPostsContent() {
     }, 3000);
   };
 
-  // 1. เปลี่ยนสถานะเป็น adopted (ยืนยัน: adopted)
+  // 1. เปลี่ยนสถานะเป็น adopted (ยืนยัน: adopted) พร้อมแจ้งเตือนผู้รับเลี้ยง
   const handleConfirmAdopted = async () => {
     if (!confirmAdoptPet) return;
     setIsUpdatingStatus(true);
     try {
       const res = await api.pets.update(confirmAdoptPet.id, { status: 'adopted' });
       if (res.success) {
+        const approvedApp =
+          (confirmAdoptPet.applications || []).find(
+            (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+          ) || (confirmAdoptPet.applications && confirmAdoptPet.applications[0]);
+
+        const recipientId = approvedApp?.applicant?.id || approvedApp?.applicantId;
+        if (recipientId) {
+          await api.messages.sendMessage({
+            receiverId: recipientId,
+            petId: confirmAdoptPet.id,
+            message: `🎉 ยืนยันการรับเลี้ยงน้อง '${confirmAdoptPet.name}' เสร็จสมบูรณ์แล้ว! ขอบคุณที่มอบบ้านใหม่ที่อบอุ่นและดูแลน้องเป็นอย่างดีครับ/ค่ะ! คุณสามารถเริ่มส่งรูปภาพอัปเดตความเป็นอยู่และเขียนรีวิวผู้ลงประกาศได้ที่หน้า 'สัตว์ที่รับเลี้ยง' ได้เลยครับ`,
+          }).catch(() => null);
+        }
+
         setPets((prev) =>
           prev.map((p) => (p.id === confirmAdoptPet.id ? { ...p, status: 'adopted' } : p))
         );
-        showNotification('success', `อัปเดตสถานะของ '${confirmAdoptPet.name}' เป็น adopted เรียบร้อยแล้ว`);
+        showNotification(
+          'success',
+          `อัปเดตสถานะของ '${confirmAdoptPet.name}' เป็น adopted และส่งข้อความแจ้งเตือนผู้รับเลี้ยงเรียบร้อยแล้ว`
+        );
         setConfirmAdoptPet(null);
+        fetchMyPets();
       } else {
         showNotification('error', res.message || 'ไม่สามารถอัปเดตสถานะได้');
       }
@@ -113,10 +131,18 @@ function MyPostsContent() {
     try {
       const res = await api.pets.update(pet.id, { status: 'available' });
       if (res.success) {
+        const approvedApp = (pet.applications || []).find(
+          (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+        );
+        if (approvedApp) {
+          await api.applications.updateStatus(approvedApp.id, 'pending').catch(() => null);
+        }
+
         setPets((prev) =>
           prev.map((p) => (p.id === pet.id ? { ...p, status: 'available' } : p))
         );
         showNotification('success', `เปลี่ยนสถานะ '${pet.name}' กลับเป็น available แล้ว`);
+        fetchMyPets();
       } else {
         showNotification('error', res.message || 'ไม่สามารถเปลี่ยนสถานะได้');
       }
@@ -125,16 +151,37 @@ function MyPostsContent() {
     }
   };
 
-  // 3. เปลี่ยนสถานะเป็น pending เมื่อเลือกผู้สนใจ
-  const handleSelectApplicant = async (petId: string, applicantName: string) => {
+  // 3. เปลี่ยนสถานะเป็น pending เมื่อเลือกผู้สนใจ พร้อมแจ้งเตือนผู้รับเลี้ยงทันที
+  const handleSelectApplicant = async (
+    petId: string,
+    applicationId?: string,
+    applicantId?: string,
+    applicantName = 'ผู้สนใจ'
+  ) => {
     try {
+      if (applicationId) {
+        await api.applications.updateStatus(applicationId, 'accepted');
+      }
       const res = await api.pets.update(petId, { status: 'pending' });
+
+      if (applicantId) {
+        await api.messages.sendMessage({
+          receiverId: applicantId,
+          petId,
+          message: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง '${viewApplicantsPet?.name || 'สัตว์เลี้ยง'}' เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
+        }).catch(() => null);
+      }
+
       if (res.success) {
         setPets((prev) =>
           prev.map((p) => (p.id === petId ? { ...p, status: 'pending' } : p))
         );
-        showNotification('success', `เลือก '${applicantName}' สำหรับการรับเลี้ยง (สถานะเป็น pending)`);
+        showNotification(
+          'success',
+          `เลือก '${applicantName}' สำหรับการรับเลี้ยง (สถานะเป็น pending) และส่งข้อความแจ้งเตือนผู้รับเลี้ยงเรียบร้อยแล้ว`
+        );
         setViewApplicantsPet(null);
+        fetchMyPets();
       }
     } catch {
       showNotification('error', 'ไม่สามารถบันทึกได้');
@@ -226,7 +273,10 @@ function MyPostsContent() {
     const count = apps.length;
 
     if (pet.status === 'pending') {
-      const primaryApplicant = apps[0]?.applicant?.fullName || 'คุณใจดี';
+      const approvedApp = apps.find(
+        (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+      ) || apps[0];
+      const primaryApplicant = approvedApp?.applicant?.fullName || 'คุณใจดี';
       return `1 คน (${primaryApplicant})`;
     }
 
@@ -237,10 +287,18 @@ function MyPostsContent() {
     return '—';
   };
 
-  // แสดงชื่อผู้รับเลี้ยงสำหรับกล่องยืนยัน
-  const getAdopterNameForConfirmation = (pet: PetWithApplications) => {
+  // แสดงผู้รับเลี้ยงสำหรับกล่องยืนยันหรือเขียนรีวิว
+  const getAdopterForConfirmation = (pet: PetWithApplications) => {
     const apps = pet.applications || [];
-    return apps[0]?.applicant?.fullName || 'คุณใจดี';
+    const approved = apps.find(
+      (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+    );
+    return approved?.applicant || apps[0]?.applicant || null;
+  };
+
+  const getAdopterNameForConfirmation = (pet: PetWithApplications) => {
+    const adopter = getAdopterForConfirmation(pet);
+    return adopter?.fullName || 'คุณใจดี';
   };
 
   // Requirement 4: In your post page the own can read only (กรณียังไม่ล็อกอิน ต้องแจ้งเตือนให้เข้าสู่ระบบ)
@@ -446,9 +504,9 @@ function MyPostsContent() {
 
                               {/* ปุ่ม รีวิว (1 ส่วน) */}
                               <Link
-                                href={`/reviews?petName=${encodeURIComponent(pet.name)}&adopter=${encodeURIComponent(
+                                href={`/reviews?targetUserId=${getAdopterForConfirmation(pet)?.id || ''}&targetUserName=${encodeURIComponent(
                                   getAdopterNameForConfirmation(pet)
-                                )}`}
+                                )}&petName=${encodeURIComponent(pet.name)}&role=adopter`}
                                 className="flex-1 min-w-0 inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded-lg bg-orange-600 hover:bg-orange-700 text-white shadow-xs transition-colors cursor-pointer active:scale-95 truncate text-center"
                                 title="รีวิวผู้รับเลี้ยง"
                               >
@@ -662,54 +720,74 @@ function MyPostsContent() {
                     ยังไม่มีผู้ส่งแบบประเมินความพร้อมสำหรับสัตว์เลี้ยงนี้
                   </p>
                 ) : (
-                  viewApplicantsPet.applications.map((app: any, idx: number) => (
-                    <div
-                      key={app.id || idx}
-                      className="border border-gray-200 rounded-lg p-4 space-y-2 hover:border-gray-300 bg-[#fafafa]"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900 text-sm">
-                          {app.applicant?.fullName || 'ผู้สนใจ'}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(app.createdAt).toLocaleDateString('th-TH')}
-                        </span>
-                      </div>
+                  viewApplicantsPet.applications.map((app: any, idx: number) => {
+                    const isSelected = app.status === 'APPROVED' || app.status === 'approved' || app.status === 'accepted';
+                    return (
+                      <div
+                        key={app.id || idx}
+                        className={`border rounded-lg p-4 space-y-2 transition-colors ${
+                          isSelected
+                            ? 'border-emerald-300 bg-emerald-50/40'
+                            : 'border-gray-200 hover:border-gray-300 bg-[#fafafa]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900 text-sm">
+                              {app.applicant?.fullName || 'ผู้สนใจ'}
+                            </span>
+                            {isSelected && (
+                              <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                ✓ ได้รับคัดเลือกแล้ว (Pending)
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            {new Date(app.createdAt).toLocaleDateString('th-TH')}
+                          </span>
+                        </div>
 
-                      <div className="text-xs text-gray-700 space-y-1">
-                        <p><strong>ที่อยู่อาศัย:</strong> {app.housingType}</p>
-                        <p><strong>ช่วงรายได้:</strong> {app.incomeRange || 'ไม่ระบุ'}</p>
-                        <p><strong>ประสบการณ์:</strong> {app.petExperience || 'ไม่มี'}</p>
-                        {app.additionalNote && (
-                          <p className="whitespace-pre-line text-gray-600 bg-white p-2 rounded-md border border-gray-100 mt-1">
-                            {app.additionalNote}
-                          </p>
-                        )}
-                      </div>
+                        <div className="text-xs text-gray-700 space-y-1">
+                          <p><strong>ที่อยู่อาศัย:</strong> {app.housingType}</p>
+                          <p><strong>ช่วงรายได้:</strong> {app.incomeRange || 'ไม่ระบุ'}</p>
+                          <p><strong>ประสบการณ์:</strong> {app.petExperience || 'ไม่มี'}</p>
+                          {app.additionalNote && (
+                            <p className="whitespace-pre-line text-gray-600 bg-white p-2 rounded-md border border-gray-100 mt-1">
+                              {app.additionalNote}
+                            </p>
+                          )}
+                        </div>
 
-                      <div className="pt-2 flex justify-end gap-2">
-                        <Link
-                          href={`/chat?user=${app.applicant?.id || app.applicantId}&userName=${encodeURIComponent(app.applicant?.fullName || 'ผู้สนใจ')}&petName=${encodeURIComponent(viewApplicantsPet.name)}&petId=${viewApplicantsPet.id}&petStatus=${viewApplicantsPet.status}`}
-                          className="inline-flex items-center justify-center gap-1.5 h-8 px-3 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 text-gray-700 font-medium cursor-pointer shadow-2xs active:scale-95 transition-colors"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5 text-gray-500" />
-                          <span>แชทสอบถาม</span>
-                        </Link>
-                        <Button
-                          type="button"
-                          onClick={() =>
-                            handleSelectApplicant(
-                              viewApplicantsPet.id,
-                              app.applicant?.fullName || 'ผู้สนใจ'
-                            )
-                          }
-                          className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md cursor-pointer transition-colors shadow-xs"
-                        >
-                          เลือกผู้รับเลี้ยงนี้ (เป็น pending)
-                        </Button>
+                        <div className="pt-2 flex justify-end gap-2">
+                          <Link
+                            href={`/chat?user=${app.applicant?.id || app.applicantId}&userName=${encodeURIComponent(app.applicant?.fullName || 'ผู้สนใจ')}&petName=${encodeURIComponent(viewApplicantsPet.name)}&petId=${viewApplicantsPet.id}&petStatus=${viewApplicantsPet.status}`}
+                            className="inline-flex items-center justify-center gap-1.5 h-8 px-3 text-xs border border-gray-300 rounded-md bg-white hover:bg-gray-50 text-gray-700 font-medium cursor-pointer shadow-2xs active:scale-95 transition-colors"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-gray-500" />
+                            <span>แชทสอบถาม</span>
+                          </Link>
+                          <Button
+                            type="button"
+                            onClick={() =>
+                              handleSelectApplicant(
+                                viewApplicantsPet.id,
+                                app.id,
+                                app.applicant?.id || app.applicantId,
+                                app.applicant?.fullName || 'ผู้สนใจ'
+                              )
+                            }
+                            className={`h-8 px-3 text-xs font-medium rounded-md cursor-pointer transition-colors shadow-xs ${
+                              isSelected
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
+                          >
+                            {isSelected ? 'เลือกแล้ว (แจ้งเตือนซ้ำ)' : 'เลือกผู้รับเลี้ยงนี้ (เป็น pending)'}
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 

@@ -48,8 +48,8 @@ function createUpdatesRouter(prisma) {
         pet_id: update.petId,
         period: update.updatePeriod,
         description: update.description,
-        images: update.images.map((image) => (
-          image.startsWith('http')
+        images: (update.images || []).map((image) => (
+          typeof image === 'string' && (image.startsWith('http') || image.startsWith('data:'))
             ? image
             : `${request.protocol}://${request.get('host')}${image}`
         )),
@@ -63,7 +63,12 @@ function createUpdatesRouter(prisma) {
     requireAuth,
     upload.array('images', 5),
     asyncHandler(async (request, response) => {
-      const { period, description } = request.body || {};
+      let { period, description } = request.body || {};
+      if (period === '1 เดือน' || period === '1_month') period = '1m';
+      else if (period === '3 เดือน' || period === '3_months') period = '3m';
+      else if (period === '5 เดือน' || period === '6 เดือน' || period === '6_months') period = '6m';
+      else if (period === '1 ปี' || period === '1_year') period = '1y';
+
       if (!['1m', '3m', '6m', '1y'].includes(period)) {
         throw apiError('INVALID_PERIOD', 'period must be 1m, 3m, 6m, or 1y');
       }
@@ -71,8 +76,14 @@ function createUpdatesRouter(prisma) {
         throw apiError('INVALID_DESCRIPTION', 'description is required');
       }
 
-      const images = request.files || [];
-      if (images.length < 3 || images.length > 5) {
+      let imagesList = [];
+      if (request.files && request.files.length > 0) {
+        imagesList = request.files.map((image) => `/uploads/updates/${image.filename}`);
+      } else if (Array.isArray(request.body.images) && request.body.images.length > 0) {
+        imagesList = request.body.images;
+      }
+
+      if (imagesList.length < 3 || imagesList.length > 5) {
         throw apiError('INVALID_IMAGES', 'An update must include 3 to 5 images');
       }
 
@@ -98,13 +109,21 @@ function createUpdatesRouter(prisma) {
           petId: pet.id,
           updatePeriod: period,
           description: description.trim(),
-          images: images.map((image) => `/uploads/updates/${image.filename}`),
+          images: imagesList,
         },
       });
 
       response.status(201).json({
         success: true,
-        data: { update_id: update.id, created_at: update.createdAt.toISOString() },
+        data: {
+          id: update.id,
+          update_id: update.id,
+          created_at: update.createdAt.toISOString(),
+          createdAt: update.createdAt.toISOString(),
+          period: update.updatePeriod,
+          description: update.description,
+          images: update.images,
+        },
       });
     }),
   );

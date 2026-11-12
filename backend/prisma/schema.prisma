@@ -16,6 +16,7 @@ enum Role {
 
 enum PetStatus {
   AVAILABLE
+  PENDING
   ADOPTED
 }
 

@@ -106,9 +106,57 @@ function createMessagesRouter(prisma) {
       }
     }
 
+    const threads = Array.from(threadMap.values());
+    for (const thread of threads) {
+      // 1. Try to find application between request.user and otherUser
+      const app = await prisma.application.findFirst({
+        where: {
+          OR: [
+            { applicantId: thread.userId, pet: { ownerId: request.user.id } },
+            { applicantId: request.user.id, pet: { ownerId: thread.userId } },
+          ],
+        },
+        include: {
+          pet: {
+            include: {
+              images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      if (app && app.pet) {
+        thread.petId = app.pet.id;
+        thread.petName = app.pet.name;
+        thread.petStatus = app.pet.status.toLowerCase();
+        thread.petImage = app.pet.images && app.pet.images[0] ? app.pet.images[0].imageUrl : null;
+      } else {
+        // 2. Try to find any pet owned by otherUser or me
+        const pet = await prisma.pet.findFirst({
+          where: {
+            OR: [
+              { ownerId: thread.userId },
+              { ownerId: request.user.id },
+            ],
+          },
+          include: {
+            images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+          },
+          orderBy: { updatedAt: 'desc' },
+        });
+        if (pet) {
+          thread.petId = pet.id;
+          thread.petName = pet.name;
+          thread.petStatus = pet.status.toLowerCase();
+          thread.petImage = pet.images && pet.images[0] ? pet.images[0].imageUrl : null;
+        }
+      }
+    }
+
     response.json({
       success: true,
-      data: Array.from(threadMap.values()),
+      data: threads,
     });
   });
 
