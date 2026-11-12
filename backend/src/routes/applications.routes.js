@@ -103,4 +103,100 @@ function createApplicationsRouter(prisma) {
   return router;
 }
 
-module.exports = { createApplicationsRouter };
+function createApplicationManagementRouter(prisma) {
+  const router = express.Router();
+  const requireAuth = createRequireAuth(prisma);
+
+  router.get('/', requireAuth, asyncHandler(async (request, response) => {
+    const { petId } = request.query;
+    const where = {};
+    if (petId) {
+      where.petId = petId;
+      where.OR = [
+        { pet: { ownerId: request.user.id } },
+        { applicantId: request.user.id },
+      ];
+    } else {
+      where.OR = [
+        { pet: { ownerId: request.user.id } },
+        { applicantId: request.user.id },
+      ];
+    }
+
+    const applications = await prisma.application.findMany({
+      where,
+      include: {
+        pet: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            status: true,
+            ownerId: true,
+          },
+        },
+        applicant: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneNumber: true,
+            profileImage: true,
+            isVerified: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    response.json({
+      success: true,
+      data: applications.map((app) => ({
+        id: app.id,
+        application_id: app.id,
+        petId: app.petId,
+        applicantId: app.applicantId,
+        status: app.status.toLowerCase(),
+        readinessForm: app.readinessForm,
+        createdAt: app.createdAt.toISOString(),
+        pet: app.pet,
+        applicant: app.applicant,
+      })),
+    });
+  }));
+
+  router.patch('/', requireAuth, asyncHandler(async (request, response) => {
+    const { id, status } = request.body || {};
+    if (!id || !status) {
+      throw apiError('INVALID_APPLICATION', 'id and status are required');
+    }
+
+    const application = await prisma.application.findUnique({
+      where: { id },
+      include: { pet: true },
+    });
+    if (!application) {
+      throw apiError('APPLICATION_NOT_FOUND', 'Application not found', undefined, 404);
+    }
+    if (application.pet.ownerId !== request.user.id && application.applicantId !== request.user.id) {
+      throw apiError('FORBIDDEN', 'No permission to update this application', undefined, 403);
+    }
+
+    let mappedStatus = 'PENDING';
+    const s = String(status).toUpperCase();
+    if (s === 'ACCEPTED' || s === 'APPROVED') mappedStatus = 'APPROVED';
+    else if (s === 'CANCELLED' || s === 'REJECTED') mappedStatus = 'CANCELLED';
+
+    const updated = await prisma.application.update({
+      where: { id },
+      data: { status: mappedStatus },
+    });
+
+    response.json({ success: true, data: updated });
+  }));
+
+  return router;
+}
+
+module.exports = { createApplicationsRouter, createApplicationManagementRouter };

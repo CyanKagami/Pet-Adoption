@@ -24,8 +24,10 @@ export interface Pet {
   status: string;
   healthHistory?: any;
   adoptionConditions?: string | null;
-  images?: PetImage[];
+  image?: string | null;
+  images?: any[];
   owner?: PetOwner;
+  applications?: any[];
   createdAt: string;
   updatedAt?: string;
 }

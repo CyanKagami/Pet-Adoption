@@ -1,0 +1,467 @@
+// src/app/chat/page.tsx
+'use client';
+
+import { useState, useEffect, useRef, Suspense } from 'react';
+import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Send, User, ExternalLink, ShieldCheck, ChevronRight, MessageSquare, Loader2, Lock } from 'lucide-react';
+import Navbar from '@/components/Navbar';
+import { api } from '@/lib/api';
+
+interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  message?: string;
+  content?: string;
+  createdAt: string;
+  sender?: { id: string; fullName: string };
+}
+
+interface ChatThread {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string;
+  userAvatar?: string | null;
+  petId?: string;
+  petName: string;
+  petStatus: string;
+  petImage?: string | null;
+  lastMessage: string;
+  time: string;
+  isNew?: boolean;
+}
+
+function ChatContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const userParam = searchParams.get('user') || searchParams.get('thread');
+  const userNameParam = searchParams.get('userName');
+  const petNameParam = searchParams.get('petName');
+  const petIdParam = searchParams.get('petId');
+  const petStatusParam = searchParams.get('petStatus');
+
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 1. Requirement 1: Only the owner of the chat can read it (ตรวจสอบสิทธิ์การล็อกอิน)
+  useEffect(() => {
+    const checkAuthAndLoad = async () => {
+      try {
+        setIsAuthLoading(true);
+        const authRes = await api.auth.me();
+        if (authRes.success && authRes.user) {
+          setCurrentUser(authRes.user);
+        } else {
+          setCurrentUser(null);
+        }
+      } catch {
+        setCurrentUser(null);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+    checkAuthAndLoad();
+  }, []);
+
+  // 2. Requirement 2: โหลดข้อมูลห้องแชทจริงจาก Database (ไม่มี Mock Data)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const loadRealThreads = async () => {
+      try {
+        const res = await api.messages.getThreads();
+        let loadedThreads: ChatThread[] = [];
+        if (res.success && Array.isArray(res.data)) {
+          loadedThreads = res.data;
+        }
+
+        // Requirement 4: เมื่อกดแชทจากหน้าอื่น หากไม่เคยคุยกัน ประวัติจะว่างเปล่าและสร้างห้องใหม่
+        if (userParam) {
+          const found = loadedThreads.find(
+            (t) =>
+              t.userId === userParam ||
+              t.id === userParam ||
+              (userNameParam && t.userName.toLowerCase() === userNameParam.toLowerCase())
+          );
+
+          if (found) {
+            if (petNameParam) found.petName = petNameParam;
+            if (petIdParam) found.petId = petIdParam;
+            if (petStatusParam) found.petStatus = petStatusParam;
+            setActiveThreadId(found.id);
+          } else {
+            // ไม่เคยคุยกันมาก่อน (Never talked with him before) -> สร้างห้องสนทนาใหม่ที่มีประวัติว่าง (empty)
+            const newThread: ChatThread = {
+              id: userParam,
+              userId: userParam,
+              userName: userNameParam || 'ผู้ติดต่อ',
+              petName: petNameParam || 'สัตว์เลี้ยง',
+              petId: petIdParam || undefined,
+              petStatus: petStatusParam || 'available',
+              lastMessage: 'เริ่มการสนทนาใหม่',
+              time: 'เมื่อสักครู่',
+              isNew: true,
+            };
+            loadedThreads = [newThread, ...loadedThreads];
+            setActiveThreadId(userParam);
+          }
+        } else if (loadedThreads.length > 0 && !activeThreadId) {
+          setActiveThreadId(loadedThreads[0].id);
+        }
+
+        setThreads(loadedThreads);
+      } catch (err) {
+        console.error('Failed to load chat threads:', err);
+      }
+    };
+
+    loadRealThreads();
+  }, [currentUser, userParam, userNameParam, petNameParam, petIdParam, petStatusParam]);
+
+  const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0] || null;
+
+  // 3. โหลดข้อความแชทจริงของห้องที่เลือก (Strict Privacy: เฉพาะคู่สนทนาเท่านั้น)
+  useEffect(() => {
+    if (!currentUser || !activeThread) {
+      setMessages([]);
+      return;
+    }
+
+    if (activeThread.isNew) {
+      setMessages([]);
+      return;
+    }
+
+    const fetchMessages = async () => {
+      try {
+        setIsLoadingMessages(true);
+        const res = await api.messages.getHistory(activeThread.userId, activeThread.petId);
+        if (res.success && Array.isArray(res.data)) {
+          setMessages(res.data);
+        } else {
+          setMessages([]);
+        }
+      } catch {
+        setMessages([]);
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    };
+
+    fetchMessages();
+  }, [currentUser, activeThread?.id, activeThread?.userId, activeThread?.petId, activeThread?.isNew]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // 4. ส่งข้อความใหม่ลงฐานข้อมูลจริง
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = inputText.trim();
+    if (!trimmed || !activeThread || isSending) return;
+
+    setIsSending(true);
+    try {
+      const res = await api.messages.sendMessage({
+        receiverId: activeThread.userId,
+        petId: activeThread.petId,
+        message: trimmed,
+      });
+
+      if (res.success && res.data) {
+        setMessages((prev) => [...prev, res.data]);
+
+        // อัปเดตรายการห้องแชท
+        setThreads((prev) =>
+          prev.map((t) => {
+            if (t.id === activeThread.id) {
+              return {
+                ...t,
+                lastMessage: trimmed,
+                time: 'เมื่อสักครู่',
+                isNew: false,
+              };
+            }
+            return t;
+          })
+        );
+
+        setInputText('');
+      } else {
+        alert(res.message || 'ไม่สามารถส่งข้อความได้');
+      }
+    } catch {
+      alert('เกิดข้อผิดพลาดในการส่งข้อความ');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  // หากยังตรวจสอบสิทธิ์อยู่
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col font-sans">
+        <Navbar activePage="chat" />
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm">กำลังตรวจสอบสิทธิ์การเข้าถึงแชท...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Requirement 1: เฉพาะเจ้าของแชทเท่านั้นที่สามารถอ่านได้ หากยังไม่ล็อกอิน ให้แสดงข้อความแจ้งเตือนและปุ่มล็อกอิน
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col font-sans">
+        <Navbar activePage="chat" />
+        <div className="flex-1 max-w-md mx-auto px-4 py-24 text-center space-y-4">
+          <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto border border-blue-200">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">เข้าสู่ระบบเพื่อดูแชท</h1>
+          <p className="text-sm text-gray-600">
+            เฉพาะเจ้าของแชทและคู่สนทนาเท่านั้นที่สามารถอ่านและส่งข้อความได้ กรุณาเข้าสู่ระบบก่อนเข้าถึงข้อมูล
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/login?redirect=/chat"
+              className="inline-flex items-center justify-center px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-xs"
+            >
+              เข้าสู่ระบบ (Login)
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-white flex flex-col font-sans text-foreground">
+      {/* 1. Header Navbar */}
+      <Navbar activePage="chat" />
+
+      {/* 2. Main Chat Container (Wireframe 06-6-Chat 1 - Real DB Data) */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-6 w-full flex-1 flex flex-col">
+        <div className="border border-gray-400 bg-white rounded-lg flex-1 flex flex-col md:flex-row min-h-[580px] overflow-hidden shadow-2xs">
+          
+          {/* คอลัมน์ซ้าย: การสนทนา (Conversations List) */}
+          <section className="w-full md:w-80 border-b md:border-b-0 md:border-r border-gray-400 flex flex-col bg-white">
+            <div className="p-4 border-b border-gray-300 flex items-center justify-between">
+              <h2 className="text-base font-bold text-gray-900 tracking-tight">
+                การสนทนา ({threads.length})
+              </h2>
+            </div>
+
+            <div className="p-3 space-y-2.5 flex-1 overflow-y-auto">
+              {threads.length === 0 ? (
+                <div className="p-6 text-center text-gray-400 text-xs">
+                  ยังไม่มีประวัติการสนทนาในระบบ
+                </div>
+              ) : (
+                threads.map((thread) => {
+                  const isActive = thread.id === activeThread?.id;
+                  return (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      onClick={() => setActiveThreadId(thread.id)}
+                      className={`w-full text-left p-3.5 rounded-lg border transition-all cursor-pointer ${
+                        isActive
+                          ? 'border-gray-900 bg-gray-50 shadow-2xs'
+                          : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50/50'
+                      }`}
+                    >
+                      <div className="font-bold text-sm text-gray-900 truncate">
+                        {thread.userName} • {thread.petName}
+                      </div>
+                      <div className="text-xs text-gray-600 truncate mt-1">
+                        {thread.isNew ? (
+                          <span className="text-blue-600 italic">เริ่มการสนทนาใหม่</span>
+                        ) : (
+                          <span>&apos;{thread.lastMessage}&apos; • {thread.time}</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+          {/* คอลัมน์ขวา: หน้าต่างแชท (Chat View) */}
+          <section className="flex-1 flex flex-col bg-white">
+            {activeThread ? (
+              <>
+                {/* Top Bar: เกี่ยวกับสัตว์เลี้ยง */}
+                <header className="p-4 border-b border-gray-300 flex items-center justify-between gap-4 bg-white">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm overflow-hidden border border-blue-200 shrink-0">
+                      {activeThread.petImage ? (
+                        <img
+                          src={activeThread.petImage}
+                          alt={activeThread.petName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>{activeThread.petName ? activeThread.petName.charAt(0) : 'P'}</span>
+                      )}
+                    </div>
+
+                    <div className="text-sm">
+                      <span className="text-gray-800">
+                        เกี่ยวกับ: <strong>{activeThread.petName}</strong> ({activeThread.petStatus || 'available'})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons: [ดูประกาศ] [ดูโปรไฟล์] */}
+                  <div className="flex items-center gap-2">
+                    {activeThread.petId ? (
+                      <Link
+                        href={`/pets/${activeThread.petId}`}
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 transition-colors cursor-pointer"
+                      >
+                        ดูประกาศ
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/pets"
+                        className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 transition-colors cursor-pointer"
+                      >
+                        ดูประกาศ
+                      </Link>
+                    )}
+
+                    <Link
+                      href={`/notifications?applicant=${activeThread.userId}`}
+                      className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-xs"
+                    >
+                      ดูโปรไฟล์
+                    </Link>
+                  </div>
+                </header>
+
+                {/* กล่องข้อความแชท (Message History) */}
+                <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white min-h-[360px] flex flex-col justify-start">
+                  {isLoadingMessages ? (
+                    <div className="flex-1 flex items-center justify-center text-gray-400 text-xs gap-2 my-auto">
+                      <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+                      <span>กำลังโหลดข้อความ...</span>
+                    </div>
+                  ) : messages.length === 0 ? (
+                    /* Requirement 4: หากไม่เคยคุยกัน ประวัติจะว่าง (empty) และสามารถพิมพ์ข้อความหาเขาได้ */
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3 my-auto animate-in fade-in">
+                      <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
+                        <MessageSquare className="w-7 h-7" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-bold text-base text-gray-900">
+                          ยังไม่มีประวัติการสนทนากับ {activeThread.userName}
+                        </p>
+                        <p className="text-xs sm:text-sm text-gray-500 max-w-sm">
+                          นี่เป็นการเริ่มต้นสนทนาครั้งแรก คุณสามารถพิมพ์ข้อความในช่องด้านล่างเพื่อส่งหา {activeThread.userName} เกี่ยวกับน้อง {activeThread.petName} ได้ทันที
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    messages.map((msg) => {
+                      const isMe = msg.senderId === currentUser.id;
+                      const text = msg.message || msg.content || '';
+                      const timeStr = new Date(msg.createdAt).toLocaleTimeString('th-TH', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      });
+
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`w-full flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                        >
+                          <div
+                            className={`max-w-[75%] sm:max-w-[65%] border rounded-lg p-3.5 text-sm shadow-2xs ${
+                              isMe
+                                ? 'bg-blue-50 border-blue-200 text-gray-900 ml-auto'
+                                : 'bg-white border-gray-400 text-gray-900 mr-auto'
+                            }`}
+                          >
+                            <p className="leading-relaxed whitespace-pre-wrap">{text}</p>
+                          </div>
+                          <span className={`text-[11px] text-gray-400 mt-1 px-1 ${isMe ? 'text-right' : 'text-left'}`}>
+                            {timeStr}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* แถบพิมพ์ข้อความด้านล่าง (Input Bar) */}
+                <footer className="p-4 border-t border-gray-300 bg-white">
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      placeholder="พิมพ์ข้อความ..."
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      disabled={isSending}
+                      className="flex-1 h-11 px-4 bg-white rounded-lg border border-gray-400 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSending || !inputText.trim()}
+                      className="h-11 px-6 bg-[#dbeafe] hover:bg-[#bfdbfe] text-[#1e40af] border border-[#bfdbfe] font-medium rounded-lg text-sm transition-colors cursor-pointer shadow-2xs shrink-0 flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                    >
+                      {isSending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <span>ส่ง</span>
+                          <Send className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </footer>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+                เลือกห้องสนทนาจากรายการทางซ้ายมือ
+              </div>
+            )}
+          </section>
+
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-white flex flex-col font-sans">
+          <Navbar activePage="chat" />
+          <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+            กำลังโหลดแชท...
+          </div>
+        </div>
+      }
+    >
+      <ChatContent />
+    </Suspense>
+  );
+}

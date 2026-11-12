@@ -84,13 +84,14 @@ export default function HomePage() {
         });
 
         if (res.success) {
+          const list = Array.isArray(res.data) ? res.data : ((res.data as any)?.pets || []);
           if (append) {
-            setPets((prev) => [...prev, ...res.data]);
+            setPets((prev) => [...prev, ...list]);
           } else {
-            setPets(res.data);
+            setPets(list);
           }
-          setTotal(res.total);
-          setTotalPages(res.totalPages);
+          setTotal(res.total ?? (res.data as any)?.total ?? list.length);
+          setTotalPages(res.totalPages ?? (res.data as any)?.totalPages ?? 1);
           setPage(targetPage);
         }
       } catch (err) {
@@ -296,7 +297,13 @@ export default function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {pets.map((pet) => {
                 const isWishlisted = wishlist.has(pet.id);
-                const primaryImage = pet.images && pet.images.length > 0 ? pet.images[0].imageUrl : null;
+                const primaryImage =
+                  pet.image ||
+                  (pet.images && pet.images.length > 0
+                    ? typeof pet.images[0] === 'string'
+                      ? pet.images[0]
+                      : pet.images[0].imageUrl
+                    : null);
 
                 return (
                   <Link

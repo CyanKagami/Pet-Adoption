@@ -22,13 +22,73 @@ export const api = {
         const errData = await res.json().catch(() => ({}));
         return { success: false, data: [], total: 0, totalPages: 0, message: errData.message };
       }
-      return res.json();
+      const json = await res.json();
+      if (json.success) {
+        const rawPets = Array.isArray(json.data) ? json.data : (json.data?.pets || []);
+        const total = json.total ?? json.data?.total ?? rawPets.length;
+        const limit = json.limit ?? json.data?.limit ?? (params?.limit || 9);
+        const totalPages = json.totalPages ?? (total > 0 ? Math.ceil(total / limit) : 1);
+
+        const normalizedPets = rawPets.map((p: any) => {
+          const rawImages = p.images || (p.image ? [p.image] : []);
+          const normalizedImages = rawImages.map((img: any, idx: number) => {
+            if (typeof img === 'string') {
+              return { id: `img-${idx}`, petId: p.id, imageUrl: img, isPrimary: idx === 0 };
+            }
+            return img;
+          });
+          const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+
+          return {
+            ...p,
+            image: primaryUrl,
+            images: normalizedImages,
+            status: (p.status || 'AVAILABLE').toLowerCase(),
+          };
+        });
+
+        return {
+          success: true,
+          data: normalizedPets,
+          total,
+          totalPages,
+        };
+      }
+      return json;
     },
 
     getById: async (id: string): Promise<{ success: boolean; data: any; message?: string }> => {
       const res = await fetch(`/api/pets/${id}`);
       if (!res.ok) throw new Error('Failed to fetch pet details');
-      return res.json();
+      const json = await res.json();
+      if (json.success && json.data) {
+        const p = json.data;
+        const rawImages = p.images || (p.image ? [p.image] : []);
+        const normalizedImages = rawImages.map((img: any, idx: number) => {
+          if (typeof img === 'string') {
+            return { id: `img-${idx}`, petId: p.id, imageUrl: img, isPrimary: idx === 0 };
+          }
+          return img;
+        });
+        const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+
+        return {
+          success: true,
+          data: {
+            ...p,
+            image: primaryUrl,
+            images: normalizedImages,
+            status: (p.status || 'AVAILABLE').toLowerCase(),
+            owner: p.owner
+              ? {
+                  ...p.owner,
+                  fullName: p.owner.fullName || p.owner.name,
+                }
+              : undefined,
+          },
+        };
+      }
+      return json;
     },
 
     create: async (payload: Partial<Pet>): Promise<{ success: boolean; data?: Pet; message?: string }> => {
@@ -149,21 +209,42 @@ export const api = {
   wishlist: {
     getAll: async () => {
       const res = await fetch('/api/wishlist');
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (json.success) {
+        const rawList = Array.isArray(json.data) ? json.data : (json.data?.pets || []);
+        const normalized = rawList.map((p: any) => {
+          const rawImages = p.images || (p.image ? [p.image] : []);
+          const primaryUrl = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          return {
+            ...p,
+            image: primaryUrl,
+            images: rawImages,
+            status: (p.status || 'AVAILABLE').toLowerCase(),
+          };
+        });
+        return { success: true, data: normalized };
+      }
+      return json;
     },
     add: async (petId: string) => {
       const res = await fetch('/api/wishlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ petId }),
+        body: JSON.stringify({ petId, pet_id: petId }),
       });
       return res.json();
     },
     remove: async (petId: string) => {
-      const res = await fetch(`/api/wishlist?petId=${petId}`, {
+      const res = await fetch(`/api/wishlist/${petId}`, {
         method: 'DELETE',
       });
-      return res.json();
+      if (res.ok) {
+        return res.json();
+      }
+      const fallback = await fetch(`/api/wishlist?petId=${petId}`, {
+        method: 'DELETE',
+      });
+      return fallback.json();
     },
   },
 
@@ -204,7 +285,11 @@ export const api = {
   notifications: {
     getAll: async () => {
       const res = await fetch('/api/notifications');
-      return res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, message: json.message || 'ไม่สามารถดึงข้อมูลการแจ้งเตือนได้', data: [] };
+      }
+      return json;
     },
   },
 };
