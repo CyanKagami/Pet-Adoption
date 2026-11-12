@@ -4,6 +4,7 @@ const path = require('node:path');
 const suites = {
   pets: 'Pets',
   applications: 'Adoption Applications',
+  notifications: 'Notifications',
   wishlists: 'Wishlists',
   updates: 'Pet Updates',
   messaging: 'Messaging',
@@ -37,14 +38,17 @@ try {
   const args = [
     '--test',
     '--test-reporter',
-    path.join(__dirname, 'api-test-reporter.js'),
+    './scripts/api-test-reporter.js',
   ];
   if (suite !== 'all') {
     args.push('--test-name-pattern', suites[suite]);
   }
-  args.push(path.join(__dirname, 'test-api.js'));
+  args.push('scripts/test-api.js');
 
-  const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, args, {
+    cwd: path.resolve(__dirname, '..'),
+    stdio: 'inherit',
+  });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;
 } catch (error) {

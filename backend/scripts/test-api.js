@@ -708,6 +708,29 @@ describe('Pet adoption API', () => {
     });
   });
 
+  describe('Notifications', () => {
+    it('GET /notifications requires authentication', async () => {
+      await expectApiError('/notifications', { status: 401, code: 'UNAUTHORIZED' });
+    });
+
+    it('GET /notifications reports no reviews for applicants without reviews', async () => {
+      const { response, body } = await request('/notifications', {
+        token: fixture.ownerToken,
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(body.success, true);
+
+      const notification = body.data.find((item) => (
+        item.applicantId === applicantId && item.petId === fixture.petId
+      ));
+      assert.ok(notification);
+      assert.equal(notification.rating, null);
+      assert.equal(notification.reviewsCount, 0);
+      assert.deepEqual(notification.reviews, []);
+    });
+  });
+
   describe('Wishlists', () => {
     it('GET /wishlists requires authentication', async () => {
       await expectApiError('/wishlists', { status: 401, code: 'UNAUTHORIZED' });
@@ -976,15 +999,19 @@ describe('Pet adoption API', () => {
         assert.ok(body.data.createdAt);
         assert.equal(body.data.period, period);
       }
+    });
 
-      const legacyForm = await createUpdateForm({ period: '6m' });
-      const { response, body } = await request(`/pets/${fixture.adoptedPetId}/updates`, {
-        method: 'POST',
-        token: fixture.applicantToken,
-        body: legacyForm,
-      });
-      assert.equal(response.status, 201);
-      assert.equal(body.data.period, '5m');
+    it('POST /pets/:pet_id/updates rejects six-month periods', async () => {
+      for (const period of ['6m', '6_months', '6 เดือน']) {
+        const form = await createUpdateForm({ period, imageCount: 0 });
+        await expectApiError(`/pets/${fixture.adoptedPetId}/updates`, {
+          status: 400,
+          code: 'INVALID_PERIOD',
+          method: 'POST',
+          token: fixture.applicantToken,
+          body: form,
+        });
+      }
     });
 
     it('GET /pets/:pet_id/updates includes created updates in newest-first order', async () => {
@@ -994,7 +1021,7 @@ describe('Pet adoption API', () => {
       assert.equal(body.success, true);
       assert.deepEqual(
         body.data.map((update) => update.period).sort(),
-        ['1m', '1m', '1y', '3m', '5m', '5m'].sort(),
+        ['1m', '1m', '1y', '3m', '5m'].sort(),
       );
       assert.ok(body.data.every((update) => update.createdAt));
       assert.ok(body.data.every((update, index) => (

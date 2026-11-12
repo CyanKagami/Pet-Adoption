@@ -23,6 +23,14 @@ function formatMonthYear(date) {
   return `${thMonths[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+function getFormString(form, ...keys) {
+  for (const key of keys) {
+    const value = form[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return 'ไม่ระบุ';
+}
+
 function createNotificationsRouter(prisma) {
   const router = express.Router();
   const requireAuth = createRequireAuth(prisma);
@@ -51,8 +59,6 @@ function createNotificationsRouter(prisma) {
           select: {
             id: true,
             fullName: true,
-            email: true,
-            phoneNumber: true,
             profileImage: true,
             isVerified: true,
             createdAt: true,
@@ -118,17 +124,21 @@ function createNotificationsRouter(prisma) {
       const avgRating =
         reviews.length > 0
           ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1))
-          : 4.8;
+          : null;
 
       const form = app.readinessForm || {};
-      const housing = form.housing_type || form.housingType || 'บ้านเดี่ยว';
-      const experience = form.experience || form.petExperience || '3 ปี';
-      const income = form.income_range || form.incomeRange || '35,000 - 50,000 บาท/เดือน';
-      let householdMembers = form.household_members || form.householdMembers || 3;
+      const housing = getFormString(form, 'housing_type', 'housingType');
+      const experience = getFormString(form, 'experience', 'petExperience');
+      const income = getFormString(form, 'income_range', 'incomeRange');
+      let householdMembers = form.household_members ?? form.householdMembers ?? null;
       if (typeof form.note === 'string' && form.note.includes('จำนวนสมาชิก')) {
         const match = form.note.match(/จำนวนสมาชิก[^\d]*(\d+)/);
-        if (match) householdMembers = parseInt(match[1], 10);
+        if (match) householdMembers = Number(match[1]);
       }
+      if (typeof householdMembers === 'string' && householdMembers.trim()) {
+        householdMembers = Number(householdMembers);
+      }
+      if (!Number.isInteger(householdMembers) || householdMembers < 1) householdMembers = null;
 
       let notifStatus = 'pending';
       if (app.status === 'APPROVED') notifStatus = 'accepted';
@@ -148,20 +158,14 @@ function createNotificationsRouter(prisma) {
         type: 'application',
         status: notifStatus,
         rating: avgRating,
-        reviewsCount: reviews.length > 0 ? reviews.length : 5,
+        reviewsCount: reviews.length,
         joinDate: `สมัครเมื่อ ${formatMonthYear(applicant.createdAt)}`,
         isVerified: applicant.isVerified,
         housing,
         experience,
         income,
         householdMembers,
-        reviews:
-          reviews.length > 0
-            ? reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' }))
-            : [
-                { stars: 5, comment: 'ดูแลดี ส่งรูปตามนัด' },
-                { stars: 4, comment: 'ตอบเร็ว' },
-              ],
+        reviews: reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' })),
       });
     }
 
@@ -169,18 +173,12 @@ function createNotificationsRouter(prisma) {
     for (const upd of petUpdates) {
       const pet = upd.pet;
       const approvedApp = pet.applications && pet.applications[0];
-      const updater = approvedApp?.applicant || {
-        id: 'unknown',
-        fullName: 'ผู้รับเลี้ยง',
-        isVerified: true,
-        createdAt: upd.createdAt,
-        reviewsReceived: [],
-      };
-      const reviews = updater.reviewsReceived || [];
+      const updater = approvedApp?.applicant || null;
+      const reviews = updater?.reviewsReceived || [];
       const avgRating =
         reviews.length > 0
           ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1))
-          : 4.8;
+          : null;
 
       let imgList = [];
       if (Array.isArray(upd.images)) {
@@ -194,9 +192,9 @@ function createNotificationsRouter(prisma) {
       notifItems.push({
         id: `update-${upd.id}`,
         dbId: upd.id,
-        applicantId: updater.id,
-        applicantName: updater.fullName,
-        applicantProfileImage: updater.profileImage || null,
+        applicantId: updater?.id || null,
+        applicantName: updater?.fullName || 'ไม่พบข้อมูลผู้รับเลี้ยง',
+        applicantProfileImage: updater?.profileImage || null,
         petId: pet.id,
         petName: pet.name,
         petStatus: pet.status.toLowerCase(),
@@ -205,22 +203,16 @@ function createNotificationsRouter(prisma) {
         type: 'update',
         status: 'pending',
         rating: avgRating,
-        reviewsCount: reviews.length > 0 ? reviews.length : 5,
-        joinDate: `สมัครเมื่อ ${formatMonthYear(updater.createdAt)}`,
-        isVerified: updater.isVerified,
-        housing: 'บ้านพักอาศัย',
-        experience: 'ผู้รับเลี้ยง',
-        income: '...',
-        householdMembers: 3,
-        reviews:
-          reviews.length > 0
-            ? reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' }))
-            : [
-                { stars: 5, comment: 'ดูแลดี ส่งรูปตามนัด' },
-                { stars: 4, comment: 'ตอบเร็ว' },
-              ],
+        reviewsCount: reviews.length,
+        joinDate: updater?.createdAt ? `สมัครเมื่อ ${formatMonthYear(updater.createdAt)}` : null,
+        isVerified: updater?.isVerified ?? null,
+        housing: null,
+        experience: null,
+        income: null,
+        householdMembers: null,
+        reviews: reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' })),
         updateDetails: {
-          description: upd.description || 'ส่งรูปอัปเดตความเป็นอยู่',
+          description: upd.description?.trim() || 'ไม่มีรายละเอียดเพิ่มเติม',
           images: imgList,
           date: formatRelativeTime(upd.createdAt),
         },
@@ -244,8 +236,6 @@ function createNotificationsRouter(prisma) {
               select: {
                 id: true,
                 fullName: true,
-                email: true,
-                phoneNumber: true,
                 profileImage: true,
                 isVerified: true,
                 createdAt: true,
@@ -266,11 +256,11 @@ function createNotificationsRouter(prisma) {
     for (const app of myApplications) {
       const pet = app.pet;
       const owner = pet.owner;
-      const reviews = owner?.reviewsReceived || [];
+      const reviews = owner.reviewsReceived || [];
       const avgRating =
         reviews.length > 0
           ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1))
-          : 4.9;
+          : null;
 
       const isApproved = app.status === 'APPROVED';
       const isRejected = app.status === 'CANCELLED' || app.status === 'REJECTED';
@@ -283,10 +273,10 @@ function createNotificationsRouter(prisma) {
       if (isApproved && isAdopted) {
         notifStatus = 'accepted';
         title = `🎉 การรับเลี้ยงสำเร็จ! คุณได้รับเลี้ยงน้อง '${pet.name}' เรียบร้อยแล้ว`;
-        note = `ยินดีด้วย! เจ้าของได้ยืนยันการรับเลี้ยงน้อง "${pet.name}" ให้คุณเรียบร้อยแล้ว คุณสามารถส่งรูปภาพอัปเดตความเป็นอยู่ตามรอบ (1 เดือน, 3 เดือน, 6 เดือน, 1 ปี) และเขียนรีวิวเจ้าของเดิมได้ที่หน้า 'สัตว์ที่รับเลี้ยง'`;
+        note = `ยินดีด้วย! เจ้าของได้ยืนยันการรับเลี้ยงน้อง "${pet.name}" ให้คุณเรียบร้อยแล้ว คุณสามารถส่งรูปภาพอัปเดตความเป็นอยู่ตามรอบ (1 เดือน, 3 เดือน, 5 เดือน, 1 ปี) และเขียนรีวิวเจ้าของเดิมได้ที่หน้า 'สัตว์ที่รับเลี้ยง'`;
       } else if (isApproved) {
         notifStatus = 'accepted';
-        title = `🎉 ยินดีด้วย! ${owner?.fullName || 'เจ้าของ'} ได้คัดเลือกคุณให้รับเลี้ยง '${pet.name}'`;
+        title = `🎉 ยินดีด้วย! ${owner.fullName} ได้คัดเลือกคุณให้รับเลี้ยง '${pet.name}'`;
         note = `เจ้าของได้คัดเลือกคุณให้เป็นผู้รับเลี้ยงน้อง "${pet.name}" เรียบร้อยแล้ว (สถานะ: รอส่งมอบ) กรุณากดปุ่ม "แชท" เพื่อพูดคุยเตรียมนัดหมายรับน้อง และเตรียมนัดรับตัวน้อง`;
       } else if (isRejected) {
         notifStatus = 'cancelled';
@@ -303,11 +293,11 @@ function createNotificationsRouter(prisma) {
         id: `applicant-app-${app.id}`,
         dbId: app.id,
         isApplicantNotification: true,
-        applicantId: owner?.id || 'owner',
-        applicantName: owner?.fullName || 'เจ้าของสัตว์เลี้ยง',
-        applicantProfileImage: owner?.profileImage || null,
-        ownerId: owner?.id,
-        ownerName: owner?.fullName,
+        applicantId: owner.id,
+        applicantName: owner.fullName,
+        applicantProfileImage: owner.profileImage || null,
+        ownerId: owner.id,
+        ownerName: owner.fullName,
         petId: pet.id,
         petName: pet.name,
         petBreed: pet.breed || pet.type,
@@ -318,20 +308,14 @@ function createNotificationsRouter(prisma) {
         type: 'application_result',
         status: notifStatus,
         rating: avgRating,
-        reviewsCount: reviews.length > 0 ? reviews.length : 12,
-        joinDate: owner?.createdAt ? `สมัครเมื่อ ${formatMonthYear(owner.createdAt)}` : 'สมาชิกยืนยันตัวตน',
-        isVerified: owner?.isVerified ?? true,
-        housing: 'ผู้ลงประกาศหาบ้าน',
-        experience: 'เจ้าของสัตว์เลี้ยงเดิม',
-        income: owner?.email || '',
-        householdMembers: 1,
-        reviews:
-          reviews.length > 0
-            ? reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' }))
-            : [
-                { stars: 5, comment: 'สุภาพ ใส่ใจทุกรายละเอียด' },
-                { stars: 5, comment: 'ส่งมอบน้องอย่างปลอดภัย' },
-              ],
+        reviewsCount: reviews.length,
+        joinDate: `สมัครเมื่อ ${formatMonthYear(owner.createdAt)}`,
+        isVerified: owner.isVerified,
+        housing: null,
+        experience: null,
+        income: null,
+        householdMembers: null,
+        reviews: reviews.map((r) => ({ stars: r.rating, comment: r.comment || '' })),
         note,
       });
     }

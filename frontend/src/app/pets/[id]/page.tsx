@@ -168,7 +168,14 @@ function PetDetailContent({ params }: PetDetailPageProps) {
   // ข้อมูลประวัติสุขภาพ
   const healthInfo = pet.healthHistory || {};
   const diseaseText = healthInfo.disease || 'ไม่มี';
-  const vaccineText = healthInfo.vaccinated ? 'ครบ (วันที่ 10 ต.ค. 2026)' : 'ครบ (วันที่ ...)';
+  const vaccineText =
+    typeof healthInfo.vaccinated === 'string' && healthInfo.vaccinated.trim()
+      ? healthInfo.vaccinated
+      : healthInfo.vaccinated === true
+        ? 'ครบ'
+        : healthInfo.vaccinated === false
+          ? 'ยังไม่ครบ'
+          : 'ไม่ระบุ';
   const neuteredText = healthInfo.neutered !== false ? 'ทำแล้ว' : 'ยังไม่ได้ทำ';
 
   return (

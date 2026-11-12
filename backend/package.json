@@ -8,6 +8,7 @@
     "start": "node server.js",
     "prisma:generate": "prisma generate",
     "seed": "node prisma/seed.js",
+    "test:notifications": "node --test scripts/notifications.routes.test.js",
     "test:auth": "node --test scripts/auth.routes.test.js",
     "mockData": "node prisma/mockData.js",
     "mockUser": "node prisma/mockUser.js",

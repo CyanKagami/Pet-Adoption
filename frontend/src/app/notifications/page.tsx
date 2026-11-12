@@ -21,7 +21,7 @@ interface NotificationItem {
   id: string;
   dbId?: string;
   isApplicantNotification?: boolean;
-  applicantId: string;
+  applicantId: string | null;
   applicantName: string;
   applicantProfileImage?: string | null;
   ownerId?: string;
@@ -35,14 +35,14 @@ interface NotificationItem {
   time: string;
   type: 'application' | 'update' | 'application_result';
   status?: 'pending' | 'accepted' | 'cancelled';
-  rating: number;
+  rating: number | null;
   reviewsCount: number;
-  joinDate: string;
-  isVerified: boolean;
-  housing: string;
-  experience: string;
-  income: string;
-  householdMembers: number;
+  joinDate: string | null;
+  isVerified: boolean | null;
+  housing: string | null;
+  experience: string | null;
+  income: string | null;
+  householdMembers: number | null;
   reviews: { stars: number; comment: string }[];
   note?: string;
   updateDetails?: {
@@ -462,12 +462,17 @@ function NotificationsContent() {
                         <div className="space-y-0.5">
                           <h4 className="font-bold text-sm text-gray-900 flex items-center gap-1">
                             {selectedNotif.applicantName}
-                            <span className="text-green-600 text-xs">✓</span>
+                            {selectedNotif.isVerified === true && (
+                              <span className="text-green-600 text-xs">✓</span>
+                            )}
                           </h4>
-                          <p className="text-xs text-amber-500 font-semibold">
-                            ★ {selectedNotif.rating} ({selectedNotif.reviewsCount} รีวิว)
+                          <p className={`text-xs font-semibold ${selectedNotif.rating !== null ? 'text-amber-500' : 'text-gray-500'}`}>
+                            {selectedNotif.rating !== null ? `★ ${selectedNotif.rating}` : 'ยังไม่มีคะแนน'}
+                            {' '}({selectedNotif.reviewsCount} รีวิว)
                           </p>
-                          <p className="text-xs text-gray-500">{selectedNotif.joinDate}</p>
+                          <p className="text-xs text-gray-500">
+                            {selectedNotif.joinDate || 'ไม่ทราบวันที่สมัคร'}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -480,7 +485,8 @@ function NotificationsContent() {
                 <div className="space-y-6">
                   {/* หัวข้อ: โปรไฟล์ผู้สนใจรับเลี้ยง */}
                   <h1 className="text-lg font-bold text-gray-900 tracking-tight">
-                    โปรไฟล์ผู้สนใจรับเลี้ยง – {selectedNotif.applicantName}
+                    {selectedNotif.type === 'update' ? 'ข้อมูลผู้รับเลี้ยง' : 'โปรไฟล์ผู้สนใจรับเลี้ยง'}
+                    {' – '}{selectedNotif.applicantName}
                   </h1>
 
                   {/* กล่องโปรไฟล์ผู้ใช้ */}
@@ -518,13 +524,27 @@ function NotificationsContent() {
                       </div>
 
                       <div className="flex items-center gap-1.5 text-xs sm:text-sm text-gray-700">
-                        <span className="flex items-center text-amber-500 font-semibold">
-                          ★ {selectedNotif.rating}
+                        {selectedNotif.rating !== null ? (
+                          <span className="flex items-center text-amber-500 font-semibold">
+                            ★ {selectedNotif.rating}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">ยังไม่มีคะแนน</span>
+                        )}
+                        <span>
+                          ({selectedNotif.reviewsCount} รีวิว) • {selectedNotif.joinDate || 'ไม่ทราบวันที่สมัคร'}
                         </span>
-                        <span>({selectedNotif.reviewsCount} รีวิว) • {selectedNotif.joinDate}</span>
                       </div>
-                      <div className="flex items-center gap-1 text-xs sm:text-sm text-emerald-700 font-medium pt-0.5">
-                        <span>ยืนยันตัวตน: ✓</span>
+                      <div className={`flex items-center gap-1 text-xs sm:text-sm font-medium pt-0.5 ${
+                        selectedNotif.isVerified === true ? 'text-emerald-700' : 'text-gray-500'
+                      }`}>
+                        <span>
+                          {selectedNotif.isVerified === true
+                            ? 'ยืนยันตัวตน: ✓'
+                            : selectedNotif.isVerified === false
+                              ? 'ยังไม่ยืนยันตัวตน'
+                              : 'ไม่ทราบสถานะการยืนยัน'}
+                        </span>
                       </div>
                       <div className="text-xs text-gray-500 pt-0.5">
                         สัตว์เลี้ยงที่สนใจ: <strong className="text-gray-800">{selectedNotif.petName}</strong>{' '}
@@ -534,46 +554,56 @@ function NotificationsContent() {
                   </div>
 
                   {/* 2 กล่องซ้ายขวา: ข้อมูลจากฟอร์มประเมิน & รีวิวจากผู้หาบ้านคนอื่น */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div className={`grid grid-cols-1 gap-4 pt-2 ${
+                    selectedNotif.type === 'application' ? 'sm:grid-cols-2' : ''
+                  }`}>
                     {/* กล่อง 1: ข้อมูลจากฟอร์มประเมิน */}
-                    <div className="border border-gray-400 rounded-lg p-5 bg-white space-y-2.5">
-                      <h3 className="font-bold text-sm text-gray-900">
-                        ข้อมูลจากฟอร์มประเมิน
-                      </h3>
-                      <ul className="text-xs sm:text-sm text-gray-800 space-y-2">
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
-                          <span>ที่อยู่อาศัย: {selectedNotif.housing}</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
-                          <span>ประสบการณ์: {selectedNotif.experience}</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
-                          <span>รายได้: {selectedNotif.income}</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
-                          <span>สมาชิกในบ้าน: {selectedNotif.householdMembers}</span>
-                        </li>
-                      </ul>
-                    </div>
+                    {selectedNotif.type === 'application' && (
+                      <div className="border border-gray-400 rounded-lg p-5 bg-white space-y-2.5">
+                        <h3 className="font-bold text-sm text-gray-900">
+                          ข้อมูลจากฟอร์มประเมิน
+                        </h3>
+                        <ul className="text-xs sm:text-sm text-gray-800 space-y-2">
+                          <li className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
+                            <span>ที่อยู่อาศัย: {selectedNotif.housing || 'ไม่ระบุ'}</span>
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
+                            <span>ประสบการณ์: {selectedNotif.experience || 'ไม่ระบุ'}</span>
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
+                            <span>รายได้: {selectedNotif.income || 'ไม่ระบุ'}</span>
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-gray-500 shrink-0" />
+                            <span>สมาชิกในบ้าน: {selectedNotif.householdMembers ?? 'ไม่ระบุ'}</span>
+                          </li>
+                        </ul>
+                      </div>
+                    )}
 
                     {/* กล่อง 2: รีวิวจากผู้หาบ้านคนอื่น */}
                     <div className="border border-gray-400 rounded-lg p-5 bg-white space-y-2.5">
                       <h3 className="font-bold text-sm text-gray-900">
-                        รีวิวจากผู้หาบ้านคนอื่น
+                        {selectedNotif.type === 'update'
+                          ? 'รีวิวจากผู้รับเลี้ยง'
+                          : 'รีวิวจากผู้หาบ้านคนอื่น'}
                       </h3>
                       <div className="text-xs sm:text-sm text-gray-800 space-y-2.5">
-                        {selectedNotif.reviews.map((rev, idx) => (
-                          <div key={idx} className="flex items-baseline gap-2">
-                            <span className="text-amber-500 font-bold shrink-0 text-xs">
-                              {'★'.repeat(rev.stars)}{'☆'.repeat(5 - rev.stars)}
-                            </span>
-                            <span className="italic text-gray-800">&apos;{rev.comment}&apos;</span>
-                          </div>
-                        ))}
+                        {selectedNotif.reviews.length > 0 ? (
+                          selectedNotif.reviews.map((rev, idx) => (
+                            <div key={idx} className="flex items-baseline gap-2">
+                              <span className="text-amber-500 font-bold shrink-0 text-xs">
+                                {'★'.repeat(rev.stars)}{'☆'.repeat(5 - rev.stars)}
+                              </span>
+                              <span className="italic text-gray-800">&apos;{rev.comment}&apos;</span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-gray-500">ยังไม่มีรีวิว</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -590,7 +620,11 @@ function NotificationsContent() {
 
               {/* แถบปุ่มด้านล่าง (Bottom Action Buttons / Status Area) */}
               <div className="pt-6 border-t border-gray-200">
-                {selectedNotif.isApplicantNotification ? (
+                {selectedNotif.type === 'update' ? (
+                  <p className="text-sm text-gray-600">
+                    เป็นการแจ้งเตือนอัปเดตความเป็นอยู่ ไม่มีการดำเนินการเกี่ยวกับใบสมัคร
+                  </p>
+                ) : selectedNotif.isApplicantNotification ? (
                   /* ปุ่มสำหรับผู้รับการแจ้งเตือน (Applicant Action Buttons) */
                   <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3">
                     {/* ปุ่ม แชทกับเจ้าของ */}
