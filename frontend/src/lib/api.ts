@@ -1,13 +1,128 @@
 // src/lib/api.ts
-import { Pet, ApplicationInput, PetFilterParams } from '@/types/pet';
+import {
+  Pet,
+  ApplicationInput,
+  PetCreateInput,
+  PetCreateResponse,
+  PetFilterParams,
+  PetApplication,
+  PetHealthHistory,
+  PetImage,
+  PetOwner,
+  PetType,
+  PetUpdateInput,
+  WishlistPet,
+} from '@/types/pet';
 
-export function cleanImageUrl(url: any): string | null {
+interface ApiError {
+  code?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+export function cleanImageUrl(url: unknown): string | null {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim();
   if (trimmed.startsWith('http://localhost:5000data:') || trimmed.startsWith('https://localhost:5000data:')) {
     return trimmed.replace(/^https?:\/\/localhost:5000/, '');
   }
   return trimmed;
+}
+
+type ApiPet = Omit<Partial<Pet>, 'images' | 'owner' | 'applications' | 'type' | 'status'> & {
+  id: string;
+  name: string;
+  location: string;
+  type?: unknown;
+  status?: unknown;
+  image?: string | null;
+  images?: Array<PetImage | string>;
+  owner_id?: string;
+  age_months?: number | null;
+  health_history?: PetHealthHistory | null;
+  conditions?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  owner?: Partial<PetOwner> & { name?: string };
+  applications?: PetApplication[];
+};
+
+function normalizePetType(value: unknown): PetType {
+  const aliases: Record<string, PetType> = {
+    dog: 'Dog',
+    'สุนัข': 'Dog',
+    cat: 'Cat',
+    'แมว': 'Cat',
+    rabbit: 'Rabbit',
+    'กระต่าย': 'Rabbit',
+    bird: 'Bird',
+    'นก': 'Bird',
+    other: 'Other',
+    'อื่นๆ': 'Other',
+  };
+  const type = typeof value === 'string'
+    ? aliases[value.trim().toLowerCase()]
+    : undefined;
+  if (type) return type;
+  throw new Error(`Unsupported pet type: ${String(value)}`);
+}
+
+function normalizePetStatus(value: unknown): Pet['status'] {
+  if (value === 'PENDING' || value === 'pending') return 'pending';
+  if (value === 'ADOPTED' || value === 'adopted') return 'adopted';
+  return 'available';
+}
+
+function normalizePet(pet: ApiPet): Pet {
+  const rawImages = pet.images || (pet.image ? [pet.image] : []);
+  const images: PetImage[] = rawImages.map((image, index) => {
+    const rawUrl = typeof image === 'string' ? image : image.imageUrl;
+    return {
+      id: typeof image === 'string' ? `img-${index}` : image.id || `img-${index}`,
+      petId: pet.id,
+      imageUrl: cleanImageUrl(rawUrl) || '',
+      isPrimary: typeof image === 'string' ? index === 0 : image.isPrimary ?? index === 0,
+    };
+  });
+  const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl)
+    || pet.image
+    || null;
+  const createdAt = pet.createdAt || pet.created_at;
+  const updatedAt = pet.updatedAt || pet.updated_at;
+  let owner: PetOwner | undefined;
+  if (!createdAt || !updatedAt) {
+    throw new Error(`Pet ${pet.id} is missing timestamps`);
+  }
+  if (pet.owner) {
+    const id = pet.owner.id || pet.ownerId || pet.owner_id;
+    const fullName = pet.owner.fullName || pet.owner.name;
+    if (!id || !fullName) {
+      throw new Error(`Pet ${pet.id} has incomplete owner data`);
+    }
+    owner = {
+      ...pet.owner,
+      id,
+      fullName,
+      isVerified: pet.owner.isVerified ?? false,
+    };
+  }
+
+  return {
+    ...pet,
+    ownerId: pet.ownerId || pet.owner_id,
+    type: normalizePetType(pet.type),
+    ageMonths: pet.ageMonths ?? null,
+    gender: pet.gender ?? null,
+    description: pet.description ?? null,
+    healthHistory: pet.healthHistory ?? pet.health_history ?? null,
+    adoptionConditions: pet.adoptionConditions ?? pet.conditions ?? null,
+    createdAt,
+    updatedAt,
+    image: cleanImageUrl(rawPrimary),
+    images,
+    status: normalizePetStatus(pet.status),
+    owner,
+  };
 }
 
 export const api = {
@@ -22,8 +137,8 @@ export const api = {
         if (params.status && params.status !== 'all') query.set('status', params.status);
         if (params.page) query.set('page', params.page.toString());
         if (params.limit) query.set('limit', params.limit.toString());
-        if ((params as any).myPosts) query.set('myPosts', 'true');
-        if ((params as any).adoptedByMe) query.set('adoptedByMe', 'true');
+        if (params.myPosts) query.set('myPosts', 'true');
+        if (params.adoptedByMe) query.set('adoptedByMe', 'true');
       }
       const queryString = query.toString();
       const res = await fetch(`/api/pets${queryString ? `?${queryString}` : ''}`);
@@ -38,28 +153,7 @@ export const api = {
         const limit = json.limit ?? json.data?.limit ?? (params?.limit || 9);
         const totalPages = json.totalPages ?? (total > 0 ? Math.ceil(total / limit) : 1);
 
-        const normalizedPets = rawPets.map((p: any) => {
-          const rawImages = p.images || (p.image ? [p.image] : []);
-          const normalizedImages = rawImages.map((img: any, idx: number) => {
-            const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
-            const cleaned = cleanImageUrl(rawUrl);
-            return {
-              id: img?.id || `img-${idx}`,
-              petId: p.id,
-              imageUrl: cleaned || '',
-              isPrimary: idx === 0,
-            };
-          });
-          const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
-          const primaryUrl = cleanImageUrl(rawPrimary);
-
-          return {
-            ...p,
-            image: primaryUrl,
-            images: normalizedImages,
-            status: (p.status || 'AVAILABLE').toLowerCase(),
-          };
-        });
+        const normalizedPets: Pet[] = rawPets.map(normalizePet);
 
         return {
           success: true,
@@ -71,46 +165,15 @@ export const api = {
       return json;
     },
 
-    getById: async (id: string): Promise<{ success: boolean; data: any; message?: string }> => {
+    getById: async (id: string): Promise<{ success: boolean; data: Pet; message?: string }> => {
       const res = await fetch(`/api/pets/${id}`);
       if (!res.ok) throw new Error('Failed to fetch pet details');
       const json = await res.json();
-      if (json.success && json.data) {
-        const p = json.data;
-        const rawImages = p.images || (p.image ? [p.image] : []);
-        const normalizedImages = rawImages.map((img: any, idx: number) => {
-          const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
-          const cleaned = cleanImageUrl(rawUrl);
-          return {
-            id: img?.id || `img-${idx}`,
-            petId: p.id,
-            imageUrl: cleaned || '',
-            isPrimary: idx === 0,
-          };
-        });
-        const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
-        const primaryUrl = cleanImageUrl(rawPrimary);
-
-        return {
-          success: true,
-          data: {
-            ...p,
-            image: primaryUrl,
-            images: normalizedImages,
-            status: (p.status || 'AVAILABLE').toLowerCase(),
-            owner: p.owner
-              ? {
-                  ...p.owner,
-                  fullName: p.owner.fullName || p.owner.name,
-                }
-              : undefined,
-          },
-        };
-      }
+      if (json.success && json.data) return { success: true, data: normalizePet(json.data) };
       return json;
     },
 
-    create: async (payload: Partial<Pet>): Promise<{ success: boolean; data?: Pet; message?: string; error?: any }> => {
+    create: async (payload: PetCreateInput): Promise<PetCreateResponse> => {
       const res = await fetch('/api/pets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -125,7 +188,7 @@ export const api = {
       }));
     },
 
-    update: async (id: string, payload: any): Promise<{ success: boolean; data?: any; message?: string }> => {
+    update: async (id: string, payload: PetUpdateInput): Promise<{ success: boolean; data?: Pet; message?: string; error?: ApiError }> => {
       const res = await fetch(`/api/pets/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -232,30 +295,54 @@ export const api = {
 
   // 5. จัดการ Wishlist (Real Database)
   wishlist: {
-    getAll: async () => {
+    getAll: async (): Promise<{ success: boolean; data: WishlistPet[]; message?: string }> => {
       const res = await fetch('/api/wishlist');
       const json = await res.json().catch(() => ({}));
       if (json.success) {
         const rawList = Array.isArray(json.data) ? json.data : (json.data?.pets || []);
-        const normalized = rawList.map((p: any) => {
-          const rawImages = p.images || (p.image ? [p.image] : []);
-          const normalizedImages = rawImages.map((img: any, idx: number) => {
-            const rawUrl = typeof img === 'string' ? img : img?.imageUrl;
+        const normalized: WishlistPet[] = rawList.map((pet: unknown) => {
+          if (!pet || typeof pet !== 'object') {
+            throw new Error('Invalid pet in wishlist response');
+          }
+          const item = pet as Record<string, unknown>;
+          if (
+            typeof item.id !== 'string'
+            || typeof item.name !== 'string'
+            || typeof item.location !== 'string'
+          ) {
+            throw new Error('Wishlist pet is missing required fields');
+          }
+          const rawImages = Array.isArray(item.images)
+            ? item.images
+            : (typeof item.image === 'string' ? [item.image] : []);
+          const normalizedImages = rawImages.map((img: unknown, idx: number) => {
+            const image = img && typeof img === 'object' ? img as Record<string, unknown> : undefined;
+            const rawUrl = typeof img === 'string' ? img : image?.imageUrl;
             const cleaned = cleanImageUrl(rawUrl);
             return {
-              id: img?.id || `img-${idx}`,
-              petId: p.id,
+              id: typeof image?.id === 'string' ? image.id : `img-${idx}`,
+              petId: item.id as string,
               imageUrl: cleaned || '',
-              isPrimary: idx === 0,
+              isPrimary: typeof image?.isPrimary === 'boolean' ? image.isPrimary : idx === 0,
             };
           });
-          const rawPrimary = (typeof rawImages[0] === 'string' ? rawImages[0] : rawImages[0]?.imageUrl) || p.image || null;
+          const firstImage = rawImages[0];
+          const firstImageUrl = typeof firstImage === 'string'
+            ? firstImage
+            : firstImage && typeof firstImage === 'object'
+              ? (firstImage as Record<string, unknown>).imageUrl
+              : null;
+          const rawPrimary = firstImageUrl || item.image || null;
           const primaryUrl = cleanImageUrl(rawPrimary);
           return {
-            ...p,
+            id: item.id as string,
+            name: item.name as string,
+            type: normalizePetType(item.type),
+            ...(typeof item.breed === 'string' && { breed: item.breed }),
+            location: item.location as string,
+            status: normalizePetStatus(item.status),
             image: primaryUrl,
             images: normalizedImages,
-            status: (p.status || 'AVAILABLE').toLowerCase(),
           };
         });
         return { success: true, data: normalized };

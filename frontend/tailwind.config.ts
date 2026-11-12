@@ -1,5 +1,5 @@
 // tailwind.config.ts
-export default {
+const tailwindConfig = {
   theme: {
     extend: {
       colors: {
@@ -26,3 +26,5 @@ export default {
     },
   },
 };
+
+export default tailwindConfig;

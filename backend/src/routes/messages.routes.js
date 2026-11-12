@@ -21,7 +21,7 @@ function createMessagesRouter(prisma) {
   const requireAuth = createRequireAuth(prisma);
 
   const getHandler = asyncHandler(async (request, response) => {
-    const { otherUserId } = request.query;
+    const { otherUserId, petId } = request.query;
 
     if (otherUserId) {
       let resolvedOtherId = otherUserId;
@@ -39,15 +39,21 @@ function createMessagesRouter(prisma) {
 
       const messages = await prisma.message.findMany({
         where: {
-          OR: [
-            { senderId: request.user.id, receiverId: resolvedOtherId },
-            { senderId: resolvedOtherId, receiverId: request.user.id },
+          AND: [
+            {
+              OR: [
+                { senderId: request.user.id, receiverId: resolvedOtherId },
+                { senderId: resolvedOtherId, receiverId: request.user.id },
+              ],
+            },
+            { petId: typeof petId === 'string' && petId ? petId : null },
           ],
         },
         orderBy: { createdAt: 'asc' },
         include: {
           sender: { select: { id: true, fullName: true, profileImage: true } },
           receiver: { select: { id: true, fullName: true, profileImage: true } },
+          pet: { select: { id: true } },
         },
       });
 
@@ -57,6 +63,7 @@ function createMessagesRouter(prisma) {
           id: m.id,
           senderId: m.senderId,
           receiverId: m.receiverId,
+          petId: m.petId,
           content: m.content,
           message: m.content,
           isRead: m.isRead,
@@ -79,6 +86,14 @@ function createMessagesRouter(prisma) {
       include: {
         sender: { select: { id: true, fullName: true, profileImage: true, email: true } },
         receiver: { select: { id: true, fullName: true, profileImage: true, email: true } },
+        pet: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }], take: 1 },
+          },
+        },
       },
     });
 
@@ -86,18 +101,19 @@ function createMessagesRouter(prisma) {
     for (const msg of allUserMessages) {
       const isMeSender = msg.senderId === request.user.id;
       const otherUser = isMeSender ? msg.receiver : msg.sender;
-      const threadKey = otherUser.id;
+      const threadKey = `${otherUser.id}:${msg.petId || 'general'}`;
 
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, {
-          id: otherUser.id,
+          id: threadKey,
           userId: otherUser.id,
           userName: otherUser.fullName,
           userEmail: otherUser.email,
           userAvatar: otherUser.profileImage,
-          petName: 'สัตว์เลี้ยง',
-          petStatus: 'available',
-          petImage: null,
+          petId: msg.pet?.id || undefined,
+          petName: msg.pet?.name || 'สัตว์เลี้ยง',
+          petStatus: msg.pet?.status.toLowerCase() || 'available',
+          petImage: msg.pet?.images?.[0]?.imageUrl || null,
           lastMessage: msg.content,
           lastMessageAt: msg.createdAt.toISOString(),
           time: formatRelativeTime(msg.createdAt),
@@ -107,53 +123,6 @@ function createMessagesRouter(prisma) {
     }
 
     const threads = Array.from(threadMap.values());
-    for (const thread of threads) {
-      // 1. Try to find application between request.user and otherUser
-      const app = await prisma.application.findFirst({
-        where: {
-          OR: [
-            { applicantId: thread.userId, pet: { ownerId: request.user.id } },
-            { applicantId: request.user.id, pet: { ownerId: thread.userId } },
-          ],
-        },
-        include: {
-          pet: {
-            include: {
-              images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-            },
-          },
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-
-      if (app && app.pet) {
-        thread.petId = app.pet.id;
-        thread.petName = app.pet.name;
-        thread.petStatus = app.pet.status.toLowerCase();
-        thread.petImage = app.pet.images && app.pet.images[0] ? app.pet.images[0].imageUrl : null;
-      } else {
-        // 2. Try to find any pet owned by otherUser or me
-        const pet = await prisma.pet.findFirst({
-          where: {
-            OR: [
-              { ownerId: thread.userId },
-              { ownerId: request.user.id },
-            ],
-          },
-          include: {
-            images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-          },
-          orderBy: { updatedAt: 'desc' },
-        });
-        if (pet) {
-          thread.petId = pet.id;
-          thread.petName = pet.name;
-          thread.petStatus = pet.status.toLowerCase();
-          thread.petImage = pet.images && pet.images[0] ? pet.images[0].imageUrl : null;
-        }
-      }
-    }
-
     response.json({
       success: true,
       data: threads,
@@ -161,8 +130,9 @@ function createMessagesRouter(prisma) {
   });
 
   const postHandler = asyncHandler(async (request, response) => {
-    const { receiver_id, receiverId, message, content } = request.body || {};
+    const { receiver_id, receiverId, pet_id, petId, message, content } = request.body || {};
     const rawReceiver = receiver_id || receiverId;
+    const rawPetId = pet_id ?? petId;
     const rawMsg = message !== undefined ? message : content;
 
     let targetReceiverId = typeof rawReceiver === 'string' ? rawReceiver.trim() : rawReceiver;
@@ -195,10 +165,24 @@ function createMessagesRouter(prisma) {
     });
     if (!receiver) throw apiError('USER_NOT_FOUND', 'Recipient not found', undefined, 404);
 
+    let targetPetId = null;
+    if (rawPetId !== undefined && rawPetId !== null) {
+      if (typeof rawPetId !== 'string' || !rawPetId.trim()) {
+        throw apiError('INVALID_PET_ID', 'petId must be a non-empty string');
+      }
+      const pet = await prisma.pet.findUnique({
+        where: { id: rawPetId.trim() },
+        select: { id: true },
+      });
+      if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
+      targetPetId = pet.id;
+    }
+
     const createdMessage = await prisma.message.create({
       data: {
         senderId: request.user.id,
         receiverId: receiver.id,
+        petId: targetPetId,
         content: rawMsg.trim(),
       },
     });
@@ -210,6 +194,7 @@ function createMessagesRouter(prisma) {
         message_id: createdMessage.id,
         senderId: createdMessage.senderId,
         receiverId: createdMessage.receiverId,
+        petId: createdMessage.petId,
         content: createdMessage.content,
         message: createdMessage.content,
         createdAt: createdMessage.createdAt.toISOString(),

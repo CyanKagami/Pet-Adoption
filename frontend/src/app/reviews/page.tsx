@@ -1,8 +1,7 @@
 // src/app/reviews/page.tsx
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
@@ -45,31 +44,34 @@ function ReviewContent() {
   const [existingReviews, setExistingReviews] = useState<DBReview[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(true);
 
-  const fetchRealReviews = async () => {
+  const fetchRealReviews = useCallback(async (): Promise<DBReview[]> => {
     try {
-      setLoadingReviews(true);
       const res = await api.reviews.getAll(targetUserIdParam || undefined);
       if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-        setExistingReviews(res.data);
-      } else {
-        const allRes = await api.reviews.getAll();
-        if (allRes.success && Array.isArray(allRes.data)) {
-          setExistingReviews(allRes.data);
-        } else {
-          setExistingReviews([]);
-        }
+        return res.data;
       }
+
+      const allRes = await api.reviews.getAll();
+      return allRes.success && Array.isArray(allRes.data) ? allRes.data : [];
     } catch (err) {
       console.error('Failed to load reviews:', err);
-      setExistingReviews([]);
-    } finally {
-      setLoadingReviews(false);
+      return [];
     }
-  };
+  }, [targetUserIdParam]);
 
   useEffect(() => {
-    fetchRealReviews();
-  }, []);
+    let isActive = true;
+    void fetchRealReviews().then((reviews) => {
+      if (isActive) {
+        setExistingReviews(reviews);
+        setLoadingReviews(false);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [fetchRealReviews]);
 
   const isValid = rating > 0 && comment.trim().length > 0;
 
@@ -92,13 +94,25 @@ function ReviewContent() {
       if (res.success) {
         setSubmitSuccess(true);
         // รีเฟรชรายการรีวิวจริง
-        fetchRealReviews();
+        setLoadingReviews(true);
+        void fetchRealReviews().then((reviews) => {
+          setExistingReviews(reviews);
+          setLoadingReviews(false);
+        });
         setTimeout(() => {
           router.push('/pets');
         }, 1800);
       } else {
-        const errorCode = (res as any)?.error?.code;
-        let msg = res.message || (res as any)?.error?.message || 'ไม่สามารถบันทึกรีวิวได้';
+        const response = res as { message?: unknown; error?: unknown };
+        const error = response.error;
+        const errorDetails = typeof error === 'object' && error !== null
+          ? error as { code?: unknown; message?: unknown }
+          : undefined;
+        const errorCode = typeof errorDetails?.code === 'string' ? errorDetails.code : undefined;
+        let msg =
+          (typeof response.message === 'string' && response.message) ||
+          (typeof errorDetails?.message === 'string' && errorDetails.message) ||
+          'ไม่สามารถบันทึกรีวิวได้';
         if (errorCode === 'INVALID_TARGET_USER') {
           msg = 'ไม่สามารถเขียนรีวิวให้ตนเองได้';
         } else if (errorCode === 'UNAUTHORIZED') {

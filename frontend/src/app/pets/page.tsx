@@ -1,20 +1,24 @@
 // src/app/pets/page.tsx
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { Plus, Loader2, X, AlertCircle, Edit, Trash2, Eye, RotateCcw, Check, Sparkles, MessageSquare, Lock, CheckCircle } from 'lucide-react';
+import { Plus, Loader2, X, AlertCircle, MessageSquare, Lock, CheckCircle } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
-import { Pet } from '@/types/pet';
+import { PET_TYPES, type Pet, type PetApplication, type PetType, type PetOwner } from '@/types/pet';
 import { Button } from '@/components/ui/button';
 
-interface PetWithApplications extends Pet {
-  applications?: any[];
+type AuthenticatedUser = Pick<PetOwner, 'id'>;
+
+type ManagedApplication = Omit<PetApplication, 'status'> & { status: string };
+
+interface PetWithApplications extends Omit<Pet, 'applications'> {
+  applications?: ManagedApplication[];
 }
 
 function MyPostsContent() {
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [pets, setPets] = useState<PetWithApplications[]>([]);
   const [adoptedPets, setAdoptedPets] = useState<PetWithApplications[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,20 +34,19 @@ function MyPostsContent() {
   // Edit Pet Modal State
   const [editPetTarget, setEditPetTarget] = useState<PetWithApplications | null>(null);
   const [editName, setEditName] = useState('');
-  const [editType, setEditType] = useState('');
+  const [editType, setEditType] = useState<PetType>('Dog');
   const [editBreed, setEditBreed] = useState('');
   const [editAgeMonths, setEditAgeMonths] = useState('');
   const [editLocation, setEditLocation] = useState('');
-  const [editStatus, setEditStatus] = useState('available');
+  const [editStatus, setEditStatus] = useState<Pet['status']>('available');
   const [editConditions, setEditConditions] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Notice Message Toast
   const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const fetchMyPets = async () => {
+  const fetchMyPets = useCallback(async () => {
     try {
-      setLoading(true);
       const authRes = await api.auth.me().catch(() => null);
       if (authRes?.success && authRes.user) {
         setCurrentUser(authRes.user);
@@ -73,10 +76,38 @@ function MyPostsContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchMyPets();
+    let cancelled = false;
+    const loadMyPets = async () => {
+      try {
+        const authRes = await api.auth.me().catch(() => null);
+        if (authRes?.success && authRes.user) {
+          const petsRes = await api.pets.getAll({ myPosts: true, limit: 50 });
+          const adoptedRes = await api.pets.getAll({ adoptedByMe: true, limit: 50 });
+          if (cancelled) return;
+          setCurrentUser(authRes.user);
+          setPets(petsRes.success && Array.isArray(petsRes.data) ? petsRes.data : []);
+          setAdoptedPets(
+            adoptedRes.success && Array.isArray(adoptedRes.data) ? adoptedRes.data : []
+          );
+        } else if (!cancelled) {
+          setCurrentUser(null);
+          setPets([]);
+          setAdoptedPets([]);
+        }
+      } catch (err) {
+        if (!cancelled) console.error('Error fetching pets:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadMyPets();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const showNotification = (type: 'success' | 'error', message: string) => {
@@ -95,7 +126,7 @@ function MyPostsContent() {
       if (res.success) {
         const approvedApp =
           (confirmAdoptPet.applications || []).find(
-            (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+            (application) => application.status === 'APPROVED' || application.status === 'approved' || application.status === 'accepted'
           ) || (confirmAdoptPet.applications && confirmAdoptPet.applications[0]);
 
         const recipientId = approvedApp?.applicant?.id || approvedApp?.applicantId;
@@ -132,7 +163,7 @@ function MyPostsContent() {
       const res = await api.pets.update(pet.id, { status: 'available' });
       if (res.success) {
         const approvedApp = (pet.applications || []).find(
-          (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+          (application) => application.status === 'APPROVED' || application.status === 'approved' || application.status === 'accepted'
         );
         if (approvedApp) {
           await api.applications.updateStatus(approvedApp.id, 'pending').catch(() => null);
@@ -274,7 +305,7 @@ function MyPostsContent() {
 
     if (pet.status === 'pending') {
       const approvedApp = apps.find(
-        (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+        (application) => application.status === 'APPROVED' || application.status === 'approved' || application.status === 'accepted'
       ) || apps[0];
       const primaryApplicant = approvedApp?.applicant?.fullName || 'คุณใจดี';
       return `1 คน (${primaryApplicant})`;
@@ -291,7 +322,7 @@ function MyPostsContent() {
   const getAdopterForConfirmation = (pet: PetWithApplications) => {
     const apps = pet.applications || [];
     const approved = apps.find(
-      (a: any) => a.status === 'APPROVED' || a.status === 'approved' || a.status === 'accepted'
+      (application) => application.status === 'APPROVED' || application.status === 'approved' || application.status === 'accepted'
     );
     return approved?.applicant || apps[0]?.applicant || null;
   };
@@ -720,7 +751,7 @@ function MyPostsContent() {
                     ยังไม่มีผู้ส่งแบบประเมินความพร้อมสำหรับสัตว์เลี้ยงนี้
                   </p>
                 ) : (
-                  viewApplicantsPet.applications.map((app: any, idx: number) => {
+                  viewApplicantsPet.applications.map((app, idx) => {
                     const isSelected = app.status === 'APPROVED' || app.status === 'approved' || app.status === 'accepted';
                     return (
                       <div
@@ -890,13 +921,15 @@ function MyPostsContent() {
                     <label className="font-semibold text-gray-800 text-xs">ชนิดสัตว์</label>
                     <select
                       value={editType}
-                      onChange={(e) => setEditType(e.target.value)}
+                      onChange={(e) => {
+                        const selected = PET_TYPES.find(({ value }) => value === e.target.value);
+                        if (selected) setEditType(selected.value);
+                      }}
                       className="w-full h-9 px-2.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-hidden focus:ring-1 focus:ring-primary"
                     >
-                      <option value="สุนัข">สุนัข</option>
-                      <option value="แมว">แมว</option>
-                      <option value="กระต่าย">กระต่าย</option>
-                      <option value="อื่นๆ">อื่นๆ</option>
+                      {PET_TYPES.map(({ value, label }) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -928,7 +961,12 @@ function MyPostsContent() {
                   <label className="font-semibold text-gray-800 text-xs">สถานะประกาศ</label>
                   <select
                     value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
+                    onChange={(e) => {
+                      const status = e.target.value;
+                      if (status === 'available' || status === 'pending' || status === 'adopted') {
+                        setEditStatus(status);
+                      }
+                    }}
                     className="w-full h-9 px-2.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-hidden focus:ring-1 focus:ring-primary font-medium"
                   >
                     <option value="available">available (เปิดรับเลี้ยง)</option>

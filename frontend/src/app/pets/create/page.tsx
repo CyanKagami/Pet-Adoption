@@ -3,23 +3,37 @@
 
 import { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import Image from 'next/image';
 import {
   Loader2,
   Plus,
   X,
-  Image as ImageIcon,
   CheckCircle2,
   ChevronDown,
   Check,
   Calendar,
   Paperclip,
-  FileText,
   AlertCircle,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import { PET_TYPES, type PetType } from '@/types/pet';
 import { Button } from '@/components/ui/button';
+
+interface ApiErrorDetails {
+  code?: string;
+  message?: string;
+}
+
+function getApiErrorDetails(value: unknown): ApiErrorDetails {
+  if (!value || typeof value !== 'object' || !('error' in value)) return {};
+  const error = value.error;
+  if (!error || typeof error !== 'object') return {};
+  return {
+    code: 'code' in error && typeof error.code === 'string' ? error.code : undefined,
+    message: 'message' in error && typeof error.message === 'string' ? error.message : undefined,
+  };
+}
 
 function CreatePetContent() {
   const router = useRouter();
@@ -29,13 +43,12 @@ function CreatePetContent() {
   const neuteredDocInputRef = useRef<HTMLInputElement>(null);
 
   // Authentication check
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   // Form Fields
   const [images, setImages] = useState<string[]>([]);
   const [name, setName] = useState('');
-  const [type, setType] = useState('');
+  const [type, setType] = useState<PetType | ''>('');
   const [breed, setBreed] = useState('');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Unknown'>('Unknown');
   const [age, setAge] = useState('');
@@ -91,9 +104,7 @@ function CreatePetContent() {
     const checkAuth = async () => {
       try {
         const res = await api.auth.me();
-        if (res.success && res.user) {
-          setCurrentUser(res.user);
-        } else {
+        if (!res.success || !res.user) {
           router.replace('/login?redirect=/pets/create');
           return;
         }
@@ -110,7 +121,6 @@ function CreatePetContent() {
   // จัดการอัปโหลดรูปภาพสัตว์เลี้ยง
   const handleImageUpload = (files: FileList | null) => {
     if (!files) return;
-    const newImages: string[] = [];
     const remainingSlots = 5 - images.length;
     const count = Math.min(files.length, remainingSlots);
 
@@ -164,11 +174,9 @@ function CreatePetContent() {
   // ตรวจสอบความถูกต้องของข้อมูล
   const isImagesValid = images.length > 0;
   const isNameValid = name.trim().length >= 2;
-  const isTypeValid = Boolean(type && type !== '' && type !== 'เลือก ▾');
+  const isTypeValid = Boolean(type);
   const isBreedValid = Boolean(breed.trim());
   const isLocationValid = Boolean(location.trim());
-  const isHealthValid = Boolean(neutered !== '' || vaccine.trim() || disease.trim());
-
   const isFormValid = isImagesValid && isNameValid && isTypeValid && isBreedValid && isLocationValid;
 
   // รวบรวมเหตุผลทั้งหมดที่ทำให้ไม่สามารถสร้างประกาศได้
@@ -185,7 +193,7 @@ function CreatePetContent() {
       }
     }
     if (!isTypeValid) {
-      reasons.push('ยังไม่ได้เลือกชนิดสัตว์เลี้ยง (กรุณาเลือก สุนัข, แมว หรืออื่นๆ)');
+      reasons.push('ยังไม่ได้เลือกชนิดสัตว์เลี้ยง (กรุณาเลือก สุนัข, แมว, กระต่าย, นก หรืออื่นๆ)');
     }
     if (!isBreedValid) {
       reasons.push('ยังไม่ได้ระบุสายพันธุ์สัตว์เลี้ยง');
@@ -204,6 +212,7 @@ function CreatePetContent() {
     if (!isFormValid) {
       return;
     }
+    if (!type) return;
 
     setIsSubmitting(true);
 
@@ -238,7 +247,7 @@ function CreatePetContent() {
           vaccineDocs,
           neuteredDocs,
         },
-        images: images as any,
+        images,
       });
 
       if (res.success) {
@@ -247,12 +256,13 @@ function CreatePetContent() {
           router.push('/pets');
         }, 1800);
       } else {
-        let errorMsg = res.message || (res as any).error?.message || 'ไม่สามารถสร้างประกาศได้';
-        const errorCode = (res as any).error?.code;
+        const errorDetails = getApiErrorDetails(res);
+        let errorMsg = res.message || errorDetails.message || 'ไม่สามารถสร้างประกาศได้';
+        const errorCode = errorDetails.code;
         if (errorCode === 'INVALID_NAME') {
           errorMsg = 'ชื่อสัตว์เลี้ยงไม่ถูกต้อง (ต้องมีความยาวอย่างน้อย 2 ตัวอักษร)';
         } else if (errorCode === 'INVALID_TYPE') {
-          errorMsg = 'ชนิดสัตว์เลี้ยงไม่ถูกต้อง (ต้องเป็น สุนัข, แมว หรืออื่นๆ)';
+          errorMsg = 'ชนิดสัตว์เลี้ยงไม่ถูกต้อง (ต้องเป็น สุนัข, แมว, กระต่าย, นก หรืออื่นๆ)';
         } else if (errorCode === 'INVALID_LOCATION') {
           errorMsg = 'กรุณาระบุที่พักพิงปัจจุบันหรือพื้นที่ของสัตว์เลี้ยง';
         } else if (errorCode === 'UNAUTHORIZED') {
@@ -375,7 +385,14 @@ function CreatePetContent() {
                     <div className="grid grid-cols-3 gap-2">
                       {images.map((img, idx) => (
                         <div key={idx} className="relative h-20 rounded-md overflow-hidden border border-gray-200 group">
-                          <img src={img} alt="" className="w-full h-full object-cover" />
+                          <Image
+                            src={img}
+                            alt=""
+                            fill
+                            sizes="(max-width: 640px) 33vw, 20vw"
+                            unoptimized
+                            className="w-full h-full object-cover"
+                          />
                           <button
                             type="button"
                             onClick={() => removeImage(idx)}
@@ -474,14 +491,14 @@ function CreatePetContent() {
 
                 {isTypeOpen && (
                   <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-300 rounded-md shadow-lg py-1.5 z-40 animate-in fade-in zoom-in-95 duration-100">
-                    {['สุนัข', 'แมว', 'กระต่าย', 'นก', 'อื่นๆ'].map((opt) => {
-                      const isSelected = type === opt;
+                    {PET_TYPES.map(({ value, label }) => {
+                      const isSelected = type === value;
                       return (
                         <button
-                          key={opt}
+                          key={value}
                           type="button"
                           onClick={() => {
-                            setType(opt);
+                            setType(value);
                             setIsTypeOpen(false);
                             if (generalError) setGeneralError('');
                           }}
@@ -491,7 +508,7 @@ function CreatePetContent() {
                               : 'text-gray-800 hover:bg-gray-100'
                           }`}
                         >
-                          <span>{opt}</span>
+                          <span>{label}</span>
                           {isSelected && <Check className="w-4 h-4 text-blue-600" />}
                         </button>
                       );

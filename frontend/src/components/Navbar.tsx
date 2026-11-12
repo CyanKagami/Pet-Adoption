@@ -7,7 +7,6 @@ import {
   PawPrint,
   User,
   LogOut,
-  LogIn,
   ChevronDown,
   Bell,
   Heart,
@@ -29,7 +28,6 @@ interface UserProfile {
 export default function Navbar({ activePage = 'search' }: { activePage?: string }) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isLoadingUser, setIsLoadingUser] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -46,8 +44,6 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
         }
       } catch {
         setCurrentUser(null);
-      } finally {
-        setIsLoadingUser(false);
       }
     };
 
@@ -65,8 +61,6 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
           }
         })
         .catch(() => setUnreadCount(null));
-    } else {
-      setUnreadCount(null);
     }
   }, [currentUser]);
 

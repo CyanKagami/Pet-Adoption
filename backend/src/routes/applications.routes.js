@@ -1,6 +1,7 @@
 const express = require('express');
 const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
+const { serializeApplication } = require('../utils/serializers');
 
 function createApplicationsRouter(prisma) {
   const router = express.Router();
@@ -152,17 +153,7 @@ function createApplicationManagementRouter(prisma) {
 
     response.json({
       success: true,
-      data: applications.map((app) => ({
-        id: app.id,
-        application_id: app.id,
-        petId: app.petId,
-        applicantId: app.applicantId,
-        status: app.status.toLowerCase(),
-        readinessForm: app.readinessForm,
-        createdAt: app.createdAt.toISOString(),
-        pet: app.pet,
-        applicant: app.applicant,
-      })),
+      data: applications.map(serializeApplication),
     });
   }));
 
@@ -246,6 +237,7 @@ function createApplicationManagementRouter(prisma) {
       data: {
         senderId: request.user.id,
         receiverId: pet.ownerId,
+        petId: pet.id,
         content: `สวัสดีครับ/ค่ะ สนใจขอรับเลี้ยงน้อง "${pet.name}" และได้ส่งแบบประเมินความพร้อมรับเลี้ยงเรียบร้อยแล้วครับ/ค่ะ`,
       },
     }).catch(() => null);
@@ -254,10 +246,9 @@ function createApplicationManagementRouter(prisma) {
       success: true,
       message: 'ส่งแบบประเมินความพร้อมรับเลี้ยงเรียบร้อยแล้ว',
       data: {
-        id: application.id,
+        ...serializeApplication(application),
         application_id: application.id,
         submitted_at: application.createdAt.toISOString(),
-        ...application,
       },
     });
   }));
@@ -305,6 +296,7 @@ function createApplicationManagementRouter(prisma) {
         data: {
           senderId: request.user.id,
           receiverId: application.applicantId,
+          petId: application.petId,
           content: `🎉 ยินดีด้วยครับ/ค่ะ! คุณได้รับการคัดเลือกให้เป็นผู้รับเลี้ยงน้อง "${application.pet.name}" เรียบร้อยแล้ว กรุณาพูดคุยเพื่อนัดหมายวันและเวลารับน้อง หรือสอบถามรายละเอียดเพิ่มเติมได้เลยครับ/ค่ะ`,
         },
       }).catch(() => null);
@@ -313,12 +305,13 @@ function createApplicationManagementRouter(prisma) {
         data: {
           senderId: request.user.id,
           receiverId: application.applicantId,
+          petId: application.petId,
           content: `ขออภัยด้วยครับ/ค่ะ คำขอรับเลี้ยงน้อง "${application.pet.name}" ไม่ผ่านการคัดเลือกในครั้งนี้ ขอขอบคุณที่ให้ความสนใจและรักสัตว์เลี้ยงครับ/ค่ะ`,
         },
       }).catch(() => null);
     }
 
-    response.json({ success: true, data: updated });
+    response.json({ success: true, data: serializeApplication(updated) });
   }));
 
   return router;

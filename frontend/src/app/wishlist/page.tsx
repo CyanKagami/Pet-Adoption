@@ -3,23 +3,15 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Heart, Loader2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
-
-interface WishlistItem {
-  id: string;
-  name: string;
-  type: string;
-  breed?: string | null;
-  status: 'available' | 'pending' | 'adopted' | string;
-  image?: string | null;
-  images?: string[];
-}
+import type { WishlistPet } from '@/types/pet';
 
 export default function WishlistPage() {
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [currentUser, setCurrentUser] = useState(false);
+  const [wishlist, setWishlist] = useState<WishlistPet[]>([]);
   const [loading, setLoading] = useState(true);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
@@ -28,9 +20,16 @@ export default function WishlistPage() {
     const fetchWishlistPets = async () => {
       try {
         setLoading(true);
-        const authRes = await api.auth.me().catch(() => null);
-        if (authRes?.success && authRes.user) {
-          setCurrentUser(authRes.user);
+        const authRes = await api.auth.me().catch(() => null) as {
+          success?: unknown;
+          user?: unknown;
+        } | null;
+        const isAuthenticated =
+          authRes?.success === true &&
+          typeof authRes.user === 'object' &&
+          authRes.user !== null;
+        if (isAuthenticated) {
+          setCurrentUser(true);
           const res = await api.wishlist.getAll();
           if (res.success && Array.isArray(res.data)) {
             setWishlist(res.data);
@@ -38,7 +37,7 @@ export default function WishlistPage() {
             setWishlist([]);
           }
         } else {
-          setCurrentUser(null);
+          setCurrentUser(false);
           setWishlist([]);
         }
       } catch (err) {
@@ -136,7 +135,11 @@ export default function WishlistPage() {
         ) : wishlist.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {wishlist.map((pet) => {
-              const displayImage = pet.image || (Array.isArray(pet.images) && pet.images.length > 0 ? pet.images[0] : null);
+              const displayImage =
+                pet.image ||
+                pet.images.find((image) => image.isPrimary)?.imageUrl ||
+                pet.images[0]?.imageUrl ||
+                null;
 
               return (
                 <div
@@ -144,11 +147,14 @@ export default function WishlistPage() {
                   className="border border-gray-400 bg-white rounded-lg p-5 flex flex-col justify-between space-y-4 shadow-2xs hover:shadow-xs transition-shadow"
                 >
                   {/* กรอบรูปภาพตาม Wireframe */}
-                  <div className="w-full h-44 border border-dashed border-gray-400 rounded-lg flex items-center justify-center text-gray-400 text-sm font-medium bg-gray-50 overflow-hidden">
+                  <div className="relative w-full h-44 border border-dashed border-gray-400 rounded-lg flex items-center justify-center text-gray-400 text-sm font-medium bg-gray-50 overflow-hidden">
                     {displayImage ? (
-                      <img
+                      <Image
                         src={displayImage}
                         alt={pet.name}
+                        fill
+                        sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        unoptimized
                         className="w-full h-full object-cover"
                       />
                     ) : (
