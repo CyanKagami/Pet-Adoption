@@ -422,7 +422,7 @@ function PetDetailContent({ params }: PetDetailPageProps) {
           <div className="bg-white border border-border rounded-xl p-6 shadow-2xs space-y-4 flex flex-col justify-between">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์ (FR-10)</h2>
+                <h2 className="text-base font-bold text-foreground">รีวิวผู้โพสต์</h2>
                 {currentUser && currentUser.id !== (pet.owner?.id || pet.ownerId) && (
                   <Link
                     href={`/reviews?targetUserId=${pet.owner?.id || pet.ownerId}&targetUserName=${encodeURIComponent(
