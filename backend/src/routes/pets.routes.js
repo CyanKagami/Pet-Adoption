@@ -40,6 +40,7 @@ function createPetsRouter(prisma) {
   }
 
   function serializePet(request, pet, includeOwner = false) {
+    const imageUrls = (pet.images || []).map((image) => imageUrl(request, image));
     const result = {
       id: pet.id,
       name: pet.name,
@@ -48,19 +49,28 @@ function createPetsRouter(prisma) {
       health_history: pet.healthInfo || undefined,
       location: pet.location,
       conditions: pet.adoptionConditions || undefined,
-      images: (pet.images || []).map((image) => imageUrl(request, image)),
+      image: imageUrls[0] || null,
+      images: imageUrls,
       status: normalizeStatus(pet.status),
       owner_id: pet.ownerId,
+      ownerId: pet.ownerId,
       created_at: pet.createdAt.toISOString(),
       updated_at: pet.updatedAt.toISOString(),
     };
 
-    if (includeOwner && pet.owner) {
+    if (pet.owner || includeOwner) {
       result.owner = {
-        id: pet.owner.id,
-        name: pet.owner.fullName,
-        email: pet.owner.email,
+        id: pet.owner?.id || pet.ownerId,
+        name: pet.owner?.fullName,
+        fullName: pet.owner?.fullName,
+        email: pet.owner?.email,
+        profileImage: pet.owner?.profileImage,
+        isVerified: pet.owner?.isVerified,
       };
+    }
+
+    if (pet.applications) {
+      result.applications = pet.applications;
     }
 
     return result;
@@ -78,7 +88,7 @@ function createPetsRouter(prisma) {
   }
 
   router.get('/', asyncHandler(async (request, response) => {
-    const { status, type, breed, location } = request.query;
+    const { status, type, breed, location, myPosts, adoptedByMe } = request.query;
     const page = Math.max(1, Number.parseInt(request.query.page, 10) || 1);
     const limit = Math.min(50, Math.max(1, Number.parseInt(request.query.limit, 10) || 10));
 
@@ -97,10 +107,73 @@ function createPetsRouter(prisma) {
       ...(location && { location: { contains: String(location), mode: 'insensitive' } }),
     };
 
+    let currentUserId = null;
+    const authHeader = request.headers.authorization;
+    let token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token && request.headers.cookie) {
+      const cookies = Object.fromEntries(
+        request.headers.cookie.split(';').map((c) => {
+          const [k, ...v] = c.trim().split('=');
+          return [k, v.join('=')];
+        })
+      );
+      token = cookies.auth_token || null;
+    }
+    if (token) {
+      try {
+        const jwt = require('jsonwebtoken');
+        const payload = jwt.verify(token, process.env.JWT_SECRET);
+        currentUserId = payload.id || payload.userId || payload.sub;
+      } catch {}
+    }
+
+    if (myPosts === 'true') {
+      if (!currentUserId) throw apiError('UNAUTHORIZED', 'Authentication required', undefined, 401);
+      where.ownerId = currentUserId;
+    }
+
+    if (adoptedByMe === 'true') {
+      if (!currentUserId) throw apiError('UNAUTHORIZED', 'Authentication required', undefined, 401);
+      where.OR = [
+        {
+          applications: {
+            some: {
+              applicantId: currentUserId,
+              status: { in: ['approved', 'accepted', 'APPROVED', 'ACCEPTED'] },
+            },
+          },
+        },
+        {
+          status: 'ADOPTED',
+          applications: {
+            some: {
+              applicantId: currentUserId,
+            },
+          },
+        },
+        {
+          updates: {
+            some: {
+              updaterId: currentUserId,
+            },
+          },
+        },
+      ];
+    }
+
     const [pets, total] = await Promise.all([
       prisma.pet.findMany({
         where,
-        include: { images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
+        include: {
+          images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+          owner: { select: { id: true, fullName: true, email: true, profileImage: true, isVerified: true } },
+          applications: {
+            include: {
+              applicant: { select: { id: true, fullName: true, email: true, phoneNumber: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -110,7 +183,7 @@ function createPetsRouter(prisma) {
 
     response.json({
       success: true,
-      data: { pets: pets.map((pet) => serializePet(request, pet)), total, page, limit },
+      data: { pets: pets.map((pet) => serializePet(request, pet, true)), total, page, limit },
     });
   }));
 

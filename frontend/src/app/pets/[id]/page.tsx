@@ -142,7 +142,11 @@ function PetDetailContent({ params }: PetDetailPageProps) {
   }
 
   const imagesList = pet.images && pet.images.length > 0 ? pet.images : [];
-  const currentImage = imagesList[selectedImageIndex]?.imageUrl || null;
+  const rawCurrentImg = imagesList[selectedImageIndex];
+  const currentImage =
+    typeof rawCurrentImg === 'string'
+      ? rawCurrentImg
+      : rawCurrentImg?.imageUrl || pet.image || null;
 
   // จัดรูปแบบอายุ
   const ageDisplay = pet.ageMonths
@@ -208,7 +212,8 @@ function PetDetailContent({ params }: PetDetailPageProps) {
             {/* กล่องรูปย่อย 4 ช่อง (Thumbnail Row: รูป, รูป, รูป, รูป) */}
             <div className="grid grid-cols-4 gap-3">
               {[0, 1, 2, 3].map((idx) => {
-                const thumbImage = imagesList[idx]?.imageUrl;
+                const rawThumb = imagesList[idx];
+                const thumbImage = typeof rawThumb === 'string' ? rawThumb : rawThumb?.imageUrl;
                 const isSelected = selectedImageIndex === idx;
 
                 return (

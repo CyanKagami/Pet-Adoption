@@ -7,13 +7,13 @@ function createWishlistsRouter(prisma) {
   const requireAuth = createRequireAuth(prisma);
 
   router.post('/', requireAuth, asyncHandler(async (request, response) => {
-    const { pet_id: petId } = request.body || {};
-    if (typeof petId !== 'string' || !petId.trim()) {
+    const rawPetId = request.body?.pet_id ?? request.body?.petId;
+    if (typeof rawPetId !== 'string' || !rawPetId.trim()) {
       throw apiError('INVALID_PET_ID', 'pet_id is required');
     }
 
     const pet = await prisma.pet.findUnique({
-      where: { id: petId.trim() },
+      where: { id: rawPetId.trim() },
       select: { id: true },
     });
     if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
@@ -47,32 +47,50 @@ function createWishlistsRouter(prisma) {
 
     response.json({
       success: true,
-      data: items.map(({ pet }) => ({
-        id: pet.id,
-        name: pet.name,
-        type: pet.type,
-        ...(pet.breed && { breed: pet.breed }),
-        location: pet.location,
-        status: pet.status === 'ADOPTED' ? 'adopted' : 'available',
-        images: pet.images.map((image) => (
+      data: items.map(({ pet }) => {
+        const imageUrls = pet.images.map((image) => (
           image.imageUrl.startsWith('http')
             ? image.imageUrl
             : `${request.protocol}://${request.get('host')}${image.imageUrl}`
-        )),
-      })),
+        ));
+        return {
+          id: pet.id,
+          name: pet.name,
+          type: pet.type,
+          ...(pet.breed && { breed: pet.breed }),
+          location: pet.location,
+          status: pet.status === 'ADOPTED' ? 'adopted' : 'available',
+          image: imageUrls[0] || null,
+          images: imageUrls,
+        };
+      }),
     });
   }));
 
-  router.delete('/:pet_id', requireAuth, asyncHandler(async (request, response) => {
+  const removeWishlistHandler = asyncHandler(async (request, response) => {
+    const rawPetId =
+      request.params?.pet_id ||
+      request.query?.pet_id ||
+      request.query?.petId ||
+      request.body?.pet_id ||
+      request.body?.petId;
+
+    if (typeof rawPetId !== 'string' || !rawPetId.trim()) {
+      throw apiError('INVALID_PET_ID', 'pet_id is required');
+    }
+
     const result = await prisma.wishlist.deleteMany({
-      where: { userId: request.user.id, petId: request.params.pet_id },
+      where: { userId: request.user.id, petId: rawPetId.trim() },
     });
     if (result.count === 0) {
       throw apiError('WISHLIST_ITEM_NOT_FOUND', 'Item not in wishlist', undefined, 404);
     }
 
     response.json({ success: true, message: 'Removed successfully' });
-  }));
+  });
+
+  router.delete('/:pet_id', requireAuth, removeWishlistHandler);
+  router.delete('/', requireAuth, removeWishlistHandler);
 
   return router;
 }
