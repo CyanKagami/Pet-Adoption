@@ -3,7 +3,7 @@
 import { Suspense, use, useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowLeft, BadgeCheck, CalendarDays, Loader2, MapPin, PawPrint, Star } from 'lucide-react';
+import { BadgeCheck, CalendarDays, Loader2, MapPin, PawPrint, Star } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api, type PublicUserProfile } from '@/lib/api';
 

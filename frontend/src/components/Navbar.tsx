@@ -54,7 +54,6 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
   // ดึงจำนวนการแจ้งเตือนจริงเฉพาะเมื่อล็อกอินแล้ว (Requirement 2: Only own only can read)
   useEffect(() => {
     if (!currentUser) {
-      setUnreadCount(null);
       return;
     }
 
@@ -113,6 +112,7 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
     try {
       await api.auth.logout();
       setCurrentUser(null);
+      setUnreadCount(null);
       setIsDropdownOpen(false);
       router.push('/login');
       router.refresh();
