@@ -1,6 +1,7 @@
 const express = require('express');
 const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
+const { toPublicImageUrl } = require('../utils/serializers');
 
 function createWishlistsRouter(prisma) {
   const router = express.Router();
@@ -50,11 +51,7 @@ function createWishlistsRouter(prisma) {
       data: items.map(({ pet }) => {
         const imageUrls = pet.images.map((image) => {
           if (!image || !image.imageUrl) return null;
-          const url = image.imageUrl;
-          if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
-            return url;
-          }
-          return `${request.protocol}://${request.get('host')}${url.startsWith('/') ? '' : '/'}${url}`;
+          return toPublicImageUrl(image.imageUrl);
         }).filter(Boolean);
         return {
           id: pet.id,

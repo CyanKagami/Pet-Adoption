@@ -402,11 +402,15 @@ export const api = {
       const res = await fetch(`/api/pets/${petId}/updates`);
       return res.json();
     },
-    create: async (petId: string, payload: { period: string; description?: string; images: string[] }) => {
+    create: async (petId: string, payload: { period: string; description?: string; images: File[] }) => {
+      const formData = new FormData();
+      formData.set('period', payload.period);
+      if (payload.description) formData.set('description', payload.description);
+      payload.images.forEach((image) => formData.append('images', image, image.name));
+
       const res = await fetch(`/api/pets/${petId}/updates`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: formData,
       });
       return res.json();
     },

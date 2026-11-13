@@ -15,6 +15,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { subscribeToNotificationChanges } from '@/lib/notifications-realtime';
 
 interface UserProfile {
   id: string;
@@ -52,16 +53,37 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
 
   // ดึงจำนวนการแจ้งเตือนจริงเฉพาะเมื่อล็อกอินแล้ว (Requirement 2: Only own only can read)
   useEffect(() => {
-    if (currentUser) {
+    if (!currentUser) {
+      setUnreadCount(null);
+      return;
+    }
+
+    let active = true;
+    const refreshNotificationCount = () => {
       api.notifications
         .getAll()
         .then((res) => {
-          if (res.success && Array.isArray(res.data)) {
+          if (active && res.success && Array.isArray(res.data)) {
             setUnreadCount(res.data.length);
           }
         })
-        .catch(() => setUnreadCount(null));
-    }
+        .catch(() => {
+          if (active) setUnreadCount(null);
+        });
+    };
+
+    refreshNotificationCount();
+    const unsubscribe = subscribeToNotificationChanges(refreshNotificationCount);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshNotificationCount();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      active = false;
+      unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [currentUser]);
 
   // ปิด Dropdown เมื่อคลิกข้างนอก

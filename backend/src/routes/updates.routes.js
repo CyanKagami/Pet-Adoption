@@ -1,9 +1,12 @@
 const express = require('express');
+const { randomUUID } = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
+const { toPublicImageUrl } = require('../utils/serializers');
+const { publishNotificationChanged } = require('../utils/notificationEvents');
 
 function createUpdatesRouter(prisma) {
   const router = express.Router();
@@ -36,7 +39,7 @@ function createUpdatesRouter(prisma) {
       destination: uploadDirectory,
       filename: (_request, file, callback) => {
         const extension = path.extname(file.originalname).toLowerCase();
-        callback(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+        callback(null, `${randomUUID()}${extension}`);
       },
     }),
     limits: { fileSize: 5 * 1024 * 1024, files: 5 },
@@ -69,11 +72,7 @@ function createUpdatesRouter(prisma) {
         pet_id: update.petId,
         period: normalizePeriod(update.updatePeriod) || update.updatePeriod,
         description: update.description,
-        images: (update.images || []).map((image) => (
-          typeof image === 'string' && (image.startsWith('http') || image.startsWith('data:'))
-            ? image
-            : `${request.protocol}://${request.get('host')}${image}`
-        )),
+        images: (update.images || []).map(toPublicImageUrl),
         createdAt: update.createdAt.toISOString(),
         created_at: update.createdAt.toISOString(),
       })),
@@ -105,7 +104,7 @@ function createUpdatesRouter(prisma) {
 
       const pet = await prisma.pet.findUnique({
         where: { id: request.params.pet_id },
-        select: { id: true, status: true },
+        select: { id: true, status: true, ownerId: true },
       });
       if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
       if (pet.status !== 'ADOPTED') {
@@ -128,6 +127,8 @@ function createUpdatesRouter(prisma) {
           images: imagesList,
         },
       });
+
+      publishNotificationChanged(pet.ownerId);
 
       response.status(201).json({
         success: true,

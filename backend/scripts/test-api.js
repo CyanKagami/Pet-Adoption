@@ -1050,6 +1050,12 @@ describe('Pet adoption API', () => {
       assert.equal(response.status, 201);
       assert.equal(body.success, true);
       assert.ok(body.data.update_id);
+      assert.equal(body.data.images.length, 3);
+      assert.equal(new Set(body.data.images).size, body.data.images.length);
+      for (const imageUrl of body.data.images) {
+        assert.match(imageUrl, /^\/uploads\/updates\/[^/]+$/);
+        await fs.access(path.join(uploadDirectories.updates, path.basename(imageUrl)));
+      }
     });
 
     it('POST /pets/:pet_id/updates rejects updates for pets that are not adopted', async () => {
@@ -1121,6 +1127,9 @@ describe('Pet adoption API', () => {
       )));
       assert.ok(body.data.every((update) => update.pet_id === fixture.adoptedPetId));
       assert.ok(body.data.every((update) => update.images.length === 3));
+      assert.ok(body.data.every((update) => (
+        update.images.every((imageUrl) => imageUrl.startsWith('/uploads/updates/'))
+      )));
     });
   });
 

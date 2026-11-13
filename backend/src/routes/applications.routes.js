@@ -2,6 +2,7 @@ const express = require('express');
 const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
 const { serializeApplication } = require('../utils/serializers');
+const { publishNotificationChanged } = require('../utils/notificationEvents');
 
 function createApplicationsRouter(prisma) {
   const router = express.Router();
@@ -24,7 +25,7 @@ function createApplicationsRouter(prisma) {
 
     const pet = await prisma.pet.findUnique({
       where: { id: request.params.pet_id },
-      select: { id: true },
+      select: { id: true, ownerId: true },
     });
     if (!pet) throw apiError('PET_NOT_FOUND', 'Pet not found', undefined, 404);
 
@@ -48,6 +49,8 @@ function createApplicationsRouter(prisma) {
       }
       throw error;
     }
+
+    publishNotificationChanged(pet.ownerId);
 
     response.status(201).json({
       success: true,
@@ -242,6 +245,8 @@ function createApplicationManagementRouter(prisma) {
       },
     }).catch(() => null);
 
+    publishNotificationChanged(pet.ownerId);
+
     response.status(201).json({
       success: true,
       message: 'ส่งแบบประเมินความพร้อมรับเลี้ยงเรียบร้อยแล้ว',
@@ -275,7 +280,7 @@ function createApplicationManagementRouter(prisma) {
     if (s === 'ACCEPTED' || s === 'APPROVED') mappedStatus = 'APPROVED';
     else if (s === 'CANCELLED' || s === 'REJECTED') mappedStatus = 'CANCELLED';
 
-    const updated = await prisma.$transaction(async (transaction) => {
+    const { updated, changed } = await prisma.$transaction(async (transaction) => {
       const transition = await transaction.application.updateMany({
         where: { id, status: { not: mappedStatus } },
         data: { status: mappedStatus },
@@ -305,14 +310,20 @@ function createApplicationManagementRouter(prisma) {
         });
       }
 
-      return transaction.application.findUnique({
+      const updatedApplication = await transaction.application.findUnique({
         where: { id },
         include: {
           pet: true,
           applicant: true,
         },
       });
+      return { updated: updatedApplication, changed: transition.count > 0 };
     });
+
+    if (changed) {
+      publishNotificationChanged(application.applicantId);
+      publishNotificationChanged(application.pet.ownerId);
+    }
 
     response.json({ success: true, data: serializeApplication(updated) });
   }));

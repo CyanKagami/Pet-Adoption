@@ -1,3 +1,11 @@
+function toPublicImageUrl(imageUrl) {
+  if (typeof imageUrl !== 'string' || imageUrl.length === 0) return imageUrl;
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:')) {
+    return imageUrl;
+  }
+  return imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
+}
+
 function serializeApplication(application) {
   const form = application.readinessForm || {};
   const housingType = form.housing_type || form.housingType || '';
@@ -29,4 +37,4 @@ function serializeApplication(application) {
   };
 }
 
-module.exports = { serializeApplication };
+module.exports = { serializeApplication, toPublicImageUrl };

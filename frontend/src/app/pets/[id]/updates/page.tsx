@@ -39,9 +39,15 @@ interface PetUpdateItem {
   createdAt: string;
 }
 
+interface SelectedImage {
+  file: File;
+  previewUrl: string;
+}
+
 function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const { id } = use(params);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagePreviewUrls = useRef(new Set<string>());
 
   const [pet, setPet] = useState<Pet | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
@@ -49,7 +55,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
   const [isPeriodOpen, setIsPeriodOpen] = useState(false);
   const periodDropdownRef = useRef<HTMLDivElement>(null);
 
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<SelectedImage[]>([]);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -68,6 +74,11 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => () => {
+    imagePreviewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    imagePreviewUrls.current.clear();
   }, []);
 
   useEffect(() => {
@@ -107,20 +118,21 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
 
   const handleImageUpload = (files: FileList | null) => {
     if (!files) return;
-    for (let i = 0; i < files.length; i++) {
-      if (images.length + i >= 5) break;
-      const file = files[i];
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          setImages((prev) => (prev.length < 5 ? [...prev, e.target!.result as string] : prev));
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+    const remainingSlots = Math.max(0, 5 - images.length);
+    const selectedImages = Array.from(files).slice(0, remainingSlots).map((file) => {
+      const previewUrl = URL.createObjectURL(file);
+      imagePreviewUrls.current.add(previewUrl);
+      return { file, previewUrl };
+    });
+    setImages((current) => [...current, ...selectedImages].slice(0, 5));
   };
 
   const removeImage = (index: number) => {
+    const removedImage = images[index];
+    if (removedImage) {
+      URL.revokeObjectURL(removedImage.previewUrl);
+      imagePreviewUrls.current.delete(removedImage.previewUrl);
+    }
     setImages((prev) => prev.filter((_, idx) => idx !== index));
   };
 
@@ -140,7 +152,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
       const res = await api.petUpdates.create(id, {
         period,
         description: `อัปเดตความเป็นอยู่รอบ ${periodLabel}`,
-        images,
+        images: images.map(({ file }) => file),
       });
 
       if (res.success) {
@@ -155,6 +167,8 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
         }
 
         setActionNotice(`ส่งรูปภาพอัปเดตความเป็นอยู่รอบ '${periodLabel}' เรียบร้อยแล้ว`);
+        images.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
+        imagePreviewUrls.current.clear();
         setImages([]);
         setHasAttemptedSubmit(false);
         // รีเฟรชรายการอัปเดตจริงจากฐานข้อมูล
@@ -380,7 +394,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept="image/*"
+                  accept="image/jpeg,image/png"
                   className="hidden"
                   onChange={(e) => handleImageUpload(e.target.files)}
                 />
@@ -406,7 +420,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                 {/* Preview slots (3-5 slots) */}
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                   {[0, 1, 2, 3, 4].map((slotIdx) => {
-                    const img = images[slotIdx];
+                    const img = images[slotIdx]?.previewUrl;
                     return (
                       <div
                         key={slotIdx}
@@ -489,7 +503,7 @@ function PetUpdatesContent({ params }: PetUpdatesPageProps) {
                       </div>
                       <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                         {item.images.map((imgUrl, idx) => (
-                          <div key={idx} className="h-20 rounded-md overflow-hidden border border-gray-200">
+                          <div key={idx} className="relative h-20 rounded-md overflow-hidden border border-gray-200">
                             <Image
                               src={imgUrl}
                               alt=""

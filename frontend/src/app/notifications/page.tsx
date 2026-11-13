@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import { api } from '@/lib/api';
+import { subscribeToNotificationChanges } from '@/lib/notifications-realtime';
 
 interface NotificationItem {
   id: string;
@@ -65,9 +66,25 @@ function NotificationsContent() {
 
   // ดึงข้อมูลการแจ้งเตือนจริงจากฐานข้อมูลเฉพาะของเจ้าของบัญชี (Requirement 2: Only own only can read)
   useEffect(() => {
-    const loadRealNotifications = async () => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+    let handleVisibilityChange: (() => void) | undefined;
+
+    const refreshNotifications = async () => {
       try {
-        setLoading(true);
+        const res = await api.notifications.getAll();
+        if (!active) return;
+        setNotifications(res.success && Array.isArray(res.data) ? res.data : []);
+      } catch (err) {
+        if (active) {
+          console.error('Failed to load notifications:', err);
+          setNotifications([]);
+        }
+      }
+    };
+
+    const initializeNotifications = async () => {
+      try {
         const authRes = await api.auth.me().catch(() => null) as {
           success?: unknown;
           user?: unknown;
@@ -76,27 +93,39 @@ function NotificationsContent() {
           authRes?.success === true &&
           typeof authRes.user === 'object' &&
           authRes.user !== null;
-        if (isAuthenticated) {
-          setCurrentUser(true);
-          const res = await api.notifications.getAll();
-          if (res.success && Array.isArray(res.data)) {
-            setNotifications(res.data);
-          } else {
-            setNotifications([]);
-          }
-        } else {
+
+        if (!active) return;
+        if (!isAuthenticated) {
           setCurrentUser(false);
           setNotifications([]);
+          return;
         }
+
+        setCurrentUser(true);
+        unsubscribe = subscribeToNotificationChanges(refreshNotifications);
+        handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') refreshNotifications();
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        await refreshNotifications();
       } catch (err) {
-        console.error('Failed to load notifications:', err);
-        setNotifications([]);
+        if (active) {
+          console.error('Failed to load notifications:', err);
+          setNotifications([]);
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
+    initializeNotifications();
 
-    loadRealNotifications();
+    return () => {
+      active = false;
+      unsubscribe?.();
+      if (handleVisibilityChange) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
   }, []);
 
   const selectedNotif =

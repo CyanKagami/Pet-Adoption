@@ -1,10 +1,12 @@
 const express = require('express');
+const { randomUUID } = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { createRequireAuth } = require('../middlewares/auth');
 const { apiError, asyncHandler } = require('../utils/http');
-const { serializeApplication } = require('../utils/serializers');
+const { serializeApplication, toPublicImageUrl } = require('../utils/serializers');
+const { publishNotificationChanged } = require('../utils/notificationEvents');
 
 async function updatePetWithAdoptionNotification(prisma, petId, ownerId, updateData, include) {
   const where = { id: petId };
@@ -15,7 +17,7 @@ async function updatePetWithAdoptionNotification(prisma, petId, ownerId, updateD
     return prisma.pet.update(options);
   }
 
-  return prisma.$transaction(async (transaction) => {
+  const result = await prisma.$transaction(async (transaction) => {
     const transition = await transaction.pet.updateMany({
       where: { ...where, status: { not: 'ADOPTED' } },
       data: updateData,
@@ -25,16 +27,18 @@ async function updatePetWithAdoptionNotification(prisma, petId, ownerId, updateD
       const otherUpdateData = { ...updateData };
       delete otherUpdateData.status;
       if (Object.keys(otherUpdateData).length > 0) {
-        return transaction.pet.update({
+        const pet = await transaction.pet.update({
           where,
           data: otherUpdateData,
           ...(include ? { include } : {}),
         });
+        return { pet, applicantId: null };
       }
-      return transaction.pet.findUnique({
+      const pet = await transaction.pet.findUnique({
         where,
         ...(include ? { include } : {}),
       });
+      return { pet, applicantId: null };
     }
 
     const updatedPet = await transaction.pet.findUnique({
@@ -57,8 +61,11 @@ async function updatePetWithAdoptionNotification(prisma, petId, ownerId, updateD
       });
     }
 
-    return updatedPet;
+    return { pet: updatedPet, applicantId: approvedApplication?.applicantId || null };
   });
+
+  if (result.applicantId) publishNotificationChanged(result.applicantId);
+  return result.pet;
 }
 
 function createPetsRouter(prisma) {
@@ -84,7 +91,7 @@ function createPetsRouter(prisma) {
       destination: uploadDirectory,
       filename: (_request, file, callback) => {
         const extension = path.extname(file.originalname).toLowerCase();
-        callback(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`);
+        callback(null, `${randomUUID()}${extension}`);
       },
     }),
     limits: { fileSize: 5 * 1024 * 1024, files: 5 },
@@ -108,17 +115,13 @@ function createPetsRouter(prisma) {
     return 'available';
   }
 
-  function imageUrl(request, image) {
+  function imageUrl(image) {
     if (!image || !image.imageUrl) return null;
-    const url = image.imageUrl;
-    if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-    return `${request.protocol}://${request.get('host')}${url.startsWith('/') ? '' : '/'}${url}`;
+    return toPublicImageUrl(image.imageUrl);
   }
 
-  function serializePet(request, pet, includeOwner = false) {
-    const imageUrls = (pet.images || []).map((image) => imageUrl(request, image));
+  function serializePet(pet, includeOwner = false) {
+    const imageUrls = (pet.images || []).map(imageUrl);
     const result = {
       id: pet.id,
       name: pet.name,
@@ -251,7 +254,7 @@ function createPetsRouter(prisma) {
 
     response.json({
       success: true,
-      data: { pets: pets.map((pet) => serializePet(request, pet, true)), total, page, limit },
+      data: { pets: pets.map((pet) => serializePet(pet, true)), total, page, limit },
     });
   }));
 
@@ -352,7 +355,7 @@ function createPetsRouter(prisma) {
         ? Number((ownerReviews.reduce((sum, r) => sum + r.rating, 0) / ownerReviews.length).toFixed(1))
         : 5.0;
 
-    const serialized = serializePet(request, pet, true);
+    const serialized = serializePet(pet, true);
     serialized.ownerStats = {
       totalPets,
       totalReviews: ownerReviews.length,
@@ -439,7 +442,7 @@ function createPetsRouter(prisma) {
 
     response.json({
       success: true,
-      data: serializePet(request, updatedPet, true),
+      data: serializePet(updatedPet, true),
     });
   }));
 

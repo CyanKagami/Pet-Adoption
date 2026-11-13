@@ -20,5 +20,11 @@ npx prisma@7 migrate dev --name init || npx prisma@7 db push
 echo "🔧 Generating Prisma Client..."
 npm run prisma:generate || exit 1
 
+if [ "${SEED_MOCK_DATA:-false}" = "true" ]; then
+  echo "🌱 Seeding mock data..."
+  npm run mockData || exit 1
+  npm run mockUser || exit 1
+fi
+
 echo "🚀 Starting Backend Application..."
 exec npm run dev

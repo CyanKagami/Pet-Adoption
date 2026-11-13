@@ -1,8 +1,13 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { after, before, describe, it } = require('node:test');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { createNotificationsRouter } = require('../src/routes/notifications.routes');
+const {
+  publishNotificationChanged,
+  subscribeToNotificationChanges,
+} = require('../src/utils/notificationEvents');
 
 process.env.JWT_SECRET = 'notifications-route-test-secret';
 
@@ -141,6 +146,7 @@ describe('GET /api/v1/notifications', () => {
     assert.equal(update.income, null);
     assert.equal(update.householdMembers, null);
     assert.equal(update.updateDetails.description, 'ไม่มีรายละเอียดเพิ่มเติม');
+    assert.deepEqual(update.updateDetails.images, petUpdate.images);
   });
 
   it('preserves actual owner identity and verification data in application results', async () => {
@@ -156,5 +162,51 @@ describe('GET /api/v1/notifications', () => {
     assert.equal(result.experience, null);
     assert.equal(result.income, null);
     assert.equal(result.householdMembers, null);
+  });
+});
+
+describe('GET /api/v1/notifications/events', () => {
+  it('delivers changes only to connections belonging to that user', () => {
+    const ownerResponse = Object.assign(new EventEmitter(), {
+      destroyed: false,
+      writableEnded: false,
+      writes: [],
+    });
+    const applicantResponse = Object.assign(new EventEmitter(), {
+      destroyed: false,
+      writableEnded: false,
+      writes: [],
+    });
+    ownerResponse.write = (event) => ownerResponse.writes.push(event);
+    applicantResponse.write = (event) => applicantResponse.writes.push(event);
+
+    subscribeToNotificationChanges(ownerId, ownerResponse);
+    subscribeToNotificationChanges(applicantId, applicantResponse);
+    publishNotificationChanged(applicantId);
+
+    assert.deepEqual(ownerResponse.writes, []);
+    assert.deepEqual(applicantResponse.writes, ['event: notifications-changed\ndata: {}\n\n']);
+    ownerResponse.emit('close');
+    applicantResponse.emit('close');
+  });
+
+  it('streams notification changes to authenticated subscribers', async () => {
+    const token = jwt.sign({ id: ownerId }, process.env.JWT_SECRET);
+    const response = await fetch(`${baseUrl}/events`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /text\/event-stream/);
+    const reader = response.body.getReader();
+    try {
+      await reader.read();
+      publishNotificationChanged(applicantId);
+      publishNotificationChanged(ownerId);
+      const { value } = await reader.read();
+      assert.match(new TextDecoder().decode(value), /event: notifications-changed/);
+    } finally {
+      await reader.cancel();
+    }
   });
 });

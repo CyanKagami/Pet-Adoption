@@ -1,6 +1,8 @@
 const express = require('express');
 const { createRequireAuth } = require('../middlewares/auth');
 const { asyncHandler } = require('../utils/http');
+const { toPublicImageUrl } = require('../utils/serializers');
+const { subscribeToNotificationChanges } = require('../utils/notificationEvents');
 
 function formatRelativeTime(date) {
   const now = new Date();
@@ -34,6 +36,24 @@ function getFormString(form, ...keys) {
 function createNotificationsRouter(prisma) {
   const router = express.Router();
   const requireAuth = createRequireAuth(prisma);
+
+  router.get('/events', requireAuth, (request, response) => {
+    response.status(200);
+    response.set({
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'Content-Type': 'text/event-stream',
+      'X-Accel-Buffering': 'no',
+    });
+    response.flushHeaders();
+    response.write(': connected\n\n');
+    subscribeToNotificationChanges(request.user.id, response);
+
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed && !response.writableEnded) response.write(': keep-alive\n\n');
+    }, 25000);
+    response.on('close', () => clearInterval(heartbeat));
+  });
 
   router.get('/', requireAuth, asyncHandler(async (request, response) => {
     const currentUserId = request.user.id;
@@ -182,11 +202,7 @@ function createNotificationsRouter(prisma) {
 
       let imgList = [];
       if (Array.isArray(upd.images)) {
-        imgList = upd.images.map((img) =>
-          typeof img === 'string' && !img.startsWith('http')
-            ? `${request.protocol}://${request.get('host')}${img}`
-            : img
-        );
+        imgList = upd.images.map(toPublicImageUrl);
       }
 
       notifItems.push({
@@ -285,9 +301,7 @@ function createNotificationsRouter(prisma) {
       }
 
       const primaryImage = pet.images && pet.images[0] ? pet.images[0].imageUrl : null;
-      const formattedPetImage = primaryImage
-        ? (primaryImage.startsWith('http') || primaryImage.startsWith('data:') ? primaryImage : `${request.protocol}://${request.get('host')}${primaryImage}`)
-        : null;
+      const formattedPetImage = primaryImage ? toPublicImageUrl(primaryImage) : null;
 
       notifItems.push({
         id: `applicant-app-${app.id}`,
