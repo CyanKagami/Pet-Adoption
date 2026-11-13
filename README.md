@@ -16,15 +16,27 @@
 ## 🚀 Quick Start & Setup Guide (การติดตั้งและเริ่มต้นใช้งาน)
 
 ### 1. การตั้งค่า Environment Variables
-ตรวจสอบไฟล์ `.env` ที่โฟลเดอร์หลัก หรือสร้างจากตัวอย่าง:
+สำหรับ Docker Compose ให้สร้างไฟล์ `.env` ที่ root ของ repository:
 ```bash
-# backend/.env
-PORT=5000
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/pet_adoption_db?schema=public"
-JWT_SECRET="supersecretjwtkey"
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=replace-with-a-local-password
+POSTGRES_DB=pet_adoption_db
+JWT_SECRET=replace-with-a-long-random-secret
+SEED_MOCK_DATA=true
+```
 
-# frontend/.env
-NEXT_PUBLIC_API_URL="http://localhost:5000/api/v1"
+Compose สร้าง `DATABASE_URL` สำหรับ backend โดยเชื่อมต่อกับ PostgreSQL ภายใน Docker network ให้อัตโนมัติ ตั้ง `SEED_MOCK_DATA=true` เมื่อต้องการให้ backend รัน `mockData` และ `mockUser` หลัง migration และสร้าง Prisma Client เสร็จ การ seed จะทำงานทุกครั้งที่ backend container เริ่มต้น จึงควรเปิดใช้เฉพาะ development/test และปิดไว้ใน production
+
+หากรัน frontend และ backend แยกกันบนเครื่อง ให้ใช้ `backend/.env`:
+```bash
+PORT=5000
+DATABASE_URL=postgresql://postgres:replace-with-a-local-password@localhost:5432/pet_adoption_db?schema=public
+JWT_SECRET=replace-with-a-long-random-secret
+```
+
+และใช้ `frontend/.env.local`:
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
 ```
 
 ### 2. รันด้วย Docker Compose (แนะนำ)
@@ -32,10 +44,13 @@ NEXT_PUBLIC_API_URL="http://localhost:5000/api/v1"
 ```bash
 docker compose up -d --build
 ```
-Compose waits for PostgreSQL and the backend readiness checks before starting dependent services. On first startup, wait for migrations and Prisma Client generation to finish.
-The frontend container builds the Next.js application and runs it with `next start`.
+Compose จะรอให้ PostgreSQL และ backend พร้อมใช้งานก่อนเริ่ม services ที่ต้องพึ่งพากัน ในการเริ่มระบบครั้งแรก โปรดรอให้ migration และการสร้าง Prisma Client เสร็จสิ้น
+คอนเทนเนอร์ frontend จะ build แอปพลิเคชัน Next.js และเริ่มทำงานด้วยคำสั่ง `next start`
 - 🌐 **Frontend:** [http://localhost:3000](http://localhost:3000)
-- 🔌 **Backend API:** [http://localhost:5000/api/v1](http://localhost:5000/api/v1)
+- 🔌 **Backend API (สำหรับ development):** [http://localhost:5000/api/v1](http://localhost:5000/api/v1)
+
+การตั้งค่า Compose สำหรับ development เปิดพอร์ต backend `5000` เพื่อให้เข้าถึงจากเครื่อง host ได้โดยตรง ส่วน frontend จะส่งคำขอ API และอัปโหลดไฟล์ผ่าน Next.js rewrites สำหรับ production สามารถให้ backend อยู่ใน Docker network ส่วนตัว และเปิดเฉพาะพอร์ตของ frontend หรือ reverse proxy ได้
+
 
 ### 3. รันแบบ Local Development
 **ขั้นตอนที่ 1: รัน Database (PostgreSQL)**
@@ -50,6 +65,7 @@ npm install
 npx prisma generate
 npx prisma migrate dev --name init # หรือรัน seed
 npm run mockData                   # นำเข้าข้อมูล Mock Data สำหรับทดสอบ
+npm run mockUser                   # สร้าง/อัปเดตบัญชีทดสอบ หากต้องการ
 npm run dev                        # เริ่มรันที่ http://localhost:5000
 ```
 
@@ -60,6 +76,7 @@ cd frontend
 npm install
 npm run dev                        # เริ่มรันที่ http://localhost:3000
 ```
+เมื่อรันแบบ local โดยตรง ให้ตั้ง `NEXT_PUBLIC_API_URL` ใน `frontend/.env.local` และให้ backend รันที่ `localhost:5000` ตาม `DATABASE_URL` ใน `backend/.env`
 
 ---
 
@@ -175,7 +192,7 @@ npm run dev                        # เริ่มรันที่ http://lo
 
 ## 🧪 การทดสอบและตรวจสอบคุณภาพโค้ด (Testing)
 
-### 1. ทดสอบ Backend API (76 Test Cases)
+### 1. ทดสอบ Backend API
 ทดสอบทุก Endpoints ครอบคลุม Auth, Pets, Applications, Wishlists, Updates, Chat, และ Reviews:
 ```bash
 cd backend
@@ -185,6 +202,8 @@ npm run test:api
 ```bash
 npm run test:api -- --suite pets
 npm run test:api -- --suite applications
+npm run test:api -- --suite updates
+npm run test:api -- --suite notifications
 npm run test:api -- --suite messaging
 npm run test:api -- --suite reviews
 ```
