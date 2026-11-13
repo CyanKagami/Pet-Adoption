@@ -390,6 +390,7 @@ describe('Pet adoption API', () => {
       );
       assert.equal(rows.length, 1);
       assert.equal(rows[0].image_url.startsWith('/uploads/pets/'), true);
+      await fs.access(path.join(uploadDirectories.pets, path.basename(rows[0].image_url)));
     });
 
     it('POST /pets rejects an image larger than five megabytes', async () => {

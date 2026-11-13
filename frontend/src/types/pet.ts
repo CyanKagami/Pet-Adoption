@@ -123,7 +123,7 @@ export interface PetCreateInput {
   location: string;
   healthHistory?: PetHealthHistory;
   adoptionConditions?: string;
-  images?: string[];
+  images?: File[];
 }
 
 export interface PetCreateResponse {

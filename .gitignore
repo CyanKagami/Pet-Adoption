@@ -40,6 +40,7 @@ dist/
 # ==========================================
 backend/dist/
 backend/build/
+backend/uploads/
 prisma/migrations/dev/
 
 # SQLite / Local Database files (if any)

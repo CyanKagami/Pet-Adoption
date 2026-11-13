@@ -35,9 +35,15 @@ function getApiErrorDetails(value: unknown): ApiErrorDetails {
   };
 }
 
+interface SelectedPetImage {
+  file: File;
+  previewUrl: string;
+}
+
 function CreatePetContent() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagePreviewUrls = useRef(new Set<string>());
   const diseaseDocInputRef = useRef<HTMLInputElement>(null);
   const vaccineDocInputRef = useRef<HTMLInputElement>(null);
   const neuteredDocInputRef = useRef<HTMLInputElement>(null);
@@ -46,7 +52,7 @@ function CreatePetContent() {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   // Form Fields
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<SelectedPetImage[]>([]);
   const [name, setName] = useState('');
   const [type, setType] = useState<PetType | ''>('');
   const [breed, setBreed] = useState('');
@@ -90,6 +96,11 @@ function CreatePetContent() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => () => {
+    imagePreviewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    imagePreviewUrls.current.clear();
+  }, []);
+
   // Adoption Conditions
   const [adoptionConditions, setAdoptionConditions] = useState('');
 
@@ -121,29 +132,24 @@ function CreatePetContent() {
   // จัดการอัปโหลดรูปภาพสัตว์เลี้ยง
   const handleImageUpload = (files: FileList | null) => {
     if (!files) return;
-    const remainingSlots = 5 - images.length;
-    const count = Math.min(files.length, remainingSlots);
-
-    for (let i = 0; i < count; i++) {
-      const file = files[i];
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            setImages((prev) => {
-              if (prev.length < 5) {
-                return [...prev, e.target!.result as string];
-              }
-              return prev;
-            });
-          }
-        };
-        reader.readAsDataURL(file);
-      }
-    }
+    const remainingSlots = Math.max(0, 5 - images.length);
+    const selectedImages = Array.from(files)
+      .filter((file) => file.type === 'image/jpeg' || file.type === 'image/png')
+      .slice(0, remainingSlots)
+      .map((file) => {
+        const previewUrl = URL.createObjectURL(file);
+        imagePreviewUrls.current.add(previewUrl);
+        return { file, previewUrl };
+      });
+    setImages((current) => [...current, ...selectedImages].slice(0, 5));
   };
 
   const removeImage = (index: number) => {
+    const removedImage = images[index];
+    if (removedImage) {
+      URL.revokeObjectURL(removedImage.previewUrl);
+      imagePreviewUrls.current.delete(removedImage.previewUrl);
+    }
     setImages((prev) => prev.filter((_, idx) => idx !== index));
   };
 
@@ -247,7 +253,7 @@ function CreatePetContent() {
           vaccineDocs,
           neuteredDocs,
         },
-        images,
+        images: images.map(({ file }) => file),
       });
 
       if (res.success) {
@@ -356,7 +362,7 @@ function CreatePetContent() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/*"
+                accept="image/jpeg,image/png"
                 onChange={(e) => handleImageUpload(e.target.files)}
                 className="hidden"
               />
@@ -386,7 +392,7 @@ function CreatePetContent() {
                       {images.map((img, idx) => (
                         <div key={idx} className="relative h-20 rounded-md overflow-hidden border border-gray-200 group">
                           <Image
-                            src={img}
+                            src={img.previewUrl}
                             alt=""
                             fill
                             sizes="(max-width: 640px) 33vw, 20vw"

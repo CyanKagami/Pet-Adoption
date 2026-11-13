@@ -174,10 +174,25 @@ export const api = {
     },
 
     create: async (payload: PetCreateInput): Promise<PetCreateResponse> => {
+      const formData = new FormData();
+      formData.set('name', payload.name);
+      formData.set('type', payload.type);
+      formData.set('location', payload.location);
+      if (payload.breed !== undefined) formData.set('breed', payload.breed);
+      if (payload.gender !== undefined) formData.set('gender', payload.gender);
+      if (payload.ageMonths !== undefined) formData.set('ageMonths', String(payload.ageMonths));
+      if (payload.description !== undefined) formData.set('description', payload.description);
+      if (payload.adoptionConditions !== undefined) {
+        formData.set('adoptionConditions', payload.adoptionConditions);
+      }
+      if (payload.healthHistory !== undefined) {
+        formData.set('health_history', JSON.stringify(payload.healthHistory));
+      }
+      payload.images?.forEach((image) => formData.append('images', image, image.name));
+
       const res = await fetch('/api/pets', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: formData,
       });
       return res.json().catch(() => ({
         success: false,
