@@ -222,6 +222,15 @@ export default function Navbar({ activePage = 'search' }: { activePage?: string 
 
                 <div className="py-1">
                   <Link
+                    href={`/profile/${currentUser.id}`}
+                    onClick={() => setIsDropdownOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-2 text-sm text-foreground hover:bg-accent transition-colors"
+                  >
+                    <User className="w-4 h-4 text-muted-foreground" />
+                    <span>ดูโปรไฟล์สาธารณะ</span>
+                  </Link>
+
+                  <Link
                     href="/pets"
                     onClick={() => setIsDropdownOpen(false)}
                     className="flex items-center gap-2.5 px-4 py-2 text-sm text-foreground hover:bg-accent transition-colors"

@@ -471,7 +471,7 @@ function ChatContent() {
                     </Link>
 
                     <Link
-                      href={`/notifications?applicant=${activeThread.userId}`}
+                      href={`/profile/${activeThread.userId}`}
                       className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-xs"
                     >
                       ดูโปรไฟล์

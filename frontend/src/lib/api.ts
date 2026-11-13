@@ -20,6 +20,37 @@ interface ApiError {
   [key: string]: unknown;
 }
 
+export interface PublicUserProfile {
+  id: string;
+  fullName: string;
+  profileImage: string | null;
+  isVerified: boolean;
+  createdAt: string;
+  adoptedPets: Array<{
+    id: string;
+    name: string;
+    type: string;
+    breed: string | null;
+    location: string;
+    status: string;
+    createdAt: string;
+    image: string | null;
+  }>;
+  reviews: Array<{
+    id: string;
+    rating: number;
+    comment: string | null;
+    createdAt: string;
+    reviewer: {
+      id: string;
+      fullName: string;
+      profileImage: string | null;
+    };
+  }>;
+  totalReviews: number;
+  averageRating: number | null;
+}
+
 export function cleanImageUrl(url: unknown): string | null {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim();
@@ -282,6 +313,13 @@ export const api = {
       const res = await fetch('/api/auth/logout', {
         method: 'POST',
       });
+      return res.json();
+    },
+  },
+
+  users: {
+    getPublicProfile: async (userId: string): Promise<{ success: boolean; data?: PublicUserProfile; message?: string }> => {
+      const res = await fetch(`/api/users/${encodeURIComponent(userId)}`);
       return res.json();
     },
   },

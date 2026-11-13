@@ -406,6 +406,14 @@ function PetDetailContent({ params }: PetDetailPageProps) {
                   <p className="text-xs text-muted-foreground">ผู้ลงประกาศหาบ้าน</p>
                 </div>
               </div>
+              {(pet.owner?.id || pet.ownerId) && (
+                <Link
+                  href={`/profile/${pet.owner?.id || pet.ownerId}`}
+                  className="inline-flex text-xs font-medium text-blue-700 hover:underline"
+                >
+                  ดูโปรไฟล์สาธารณะ →
+                </Link>
+              )}
 
               <div className="pt-2 border-t border-border/60 space-y-1.5 text-muted-foreground">
                 <p>สมัครเมื่อ: <span className="text-foreground font-medium">{ownerJoinedDate}</span></p>
